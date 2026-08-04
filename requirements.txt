@@ -1,0 +1,13 @@
+streamlit
+youtube-transcript-api
+yt-dlp
+ffmpeg-python
+openai-whisper
+anthropic
+google-genai
+google-api-python-client
+google-auth-oauthlib
+opencv-python<5
+python-dotenv
+httpx
+pytest
