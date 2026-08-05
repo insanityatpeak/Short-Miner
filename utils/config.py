@@ -11,7 +11,7 @@ YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
 YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
-GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 OUTPUT_DIR = "output"
 SOURCE_DIR = os.path.join(OUTPUT_DIR, "source")
