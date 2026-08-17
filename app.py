@@ -8,6 +8,7 @@ Run: streamlit run app.py
 import io
 import os
 import zipfile
+from contextlib import contextmanager
 
 import streamlit as st
 
@@ -273,6 +274,18 @@ url = st.text_input("YouTube video URL", placeholder="https://www.youtube.com/wa
 run_clicked = st.button("Run", type="primary", disabled=not url)
 
 
+@contextmanager
+def sm_section(title: str | None = None):
+    """Wrap a page section in the DESIGN.md `.sm-section` div, with an
+    optional `.sm-section-title` heading. Keeps the open/close markup pair
+    together at one call site instead of three copies that can drift apart."""
+    st.markdown('<div class="sm-section">', unsafe_allow_html=True)
+    if title:
+        st.markdown(f'<p class="sm-section-title">{title}</p>', unsafe_allow_html=True)
+    yield
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def _build_clips_zip(clip_paths: list[str]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -339,57 +352,52 @@ if run_clicked:
 if "results" in st.session_state:
     results = st.session_state["results"]
 
-    st.markdown('<div class="sm-section">', unsafe_allow_html=True)
-    st.markdown('<p class="sm-section-title">Your Shorts</p>', unsafe_allow_html=True)
-    cols = st.columns(len(results["clip_paths"]) or 1)
-    for i, col in enumerate(cols):
-        if i >= len(results["clip_paths"]):
-            continue
-        with col:
-            with st.container(key=f"clip-card-{i}"):
-                st.video(results["clip_paths"][i])
-                meta = results["metadata"][i]
-                st.markdown(f'<p class="sm-eyebrow">Clip {i + 1:02d}</p>', unsafe_allow_html=True)
-                st.markdown(f'<p class="sm-card-title">{meta["title"]}</p>', unsafe_allow_html=True)
-                st.markdown(f'<p class="sm-card-desc">{meta["description"]}</p>', unsafe_allow_html=True)
-                chips = "".join(f'<span class="sm-chip">{h}</span>' for h in meta["hashtags"])
-                st.markdown(f'<div class="sm-chip-row">{chips}</div>', unsafe_allow_html=True)
-                st.markdown(
-                    f'<p class="sm-card-reason">Why this clip: {results["scored"][i]["reason"]}</p>',
-                    unsafe_allow_html=True,
-                )
-    st.markdown("</div>", unsafe_allow_html=True)
+    with sm_section("Your Shorts"):
+        cols = st.columns(len(results["clip_paths"]) or 1)
+        for i, col in enumerate(cols):
+            if i >= len(results["clip_paths"]):
+                continue
+            with col:
+                with st.container(key=f"clip-card-{i}"):
+                    st.video(results["clip_paths"][i])
+                    meta = results["metadata"][i]
+                    st.markdown(f'<p class="sm-eyebrow">Clip {i + 1:02d}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="sm-card-title">{meta["title"]}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="sm-card-desc">{meta["description"]}</p>', unsafe_allow_html=True)
+                    chips = "".join(f'<span class="sm-chip">{h}</span>' for h in meta["hashtags"])
+                    st.markdown(f'<div class="sm-chip-row">{chips}</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<p class="sm-card-reason">Why this clip: {results["scored"][i]["reason"]}</p>',
+                        unsafe_allow_html=True,
+                    )
 
-    st.markdown('<div class="sm-section">', unsafe_allow_html=True)
-    st.markdown('<p class="sm-section-title">📈 Best posting time</p>', unsafe_allow_html=True)
-    posting_time = results["posting_time"]
-    if posting_time is None:
-        st.info("Analytics unavailable — connect a YouTube account to enable this.")
-    else:
-        with st.container(key="posting-panel"):
-            windows = posting_time["top_windows"]
-            callout_cols = st.columns(len(windows) or 1)
-            for i, col in enumerate(callout_cols):
-                w = windows[i]
-                with col:
-                    with st.container(key=f"callout-{i}"):
-                        rank_label = "Best window" if i == 0 else "Runner-up"
-                        st.markdown(f'<p class="sm-callout-label">{rank_label}</p>', unsafe_allow_html=True)
-                        st.markdown(f'<p class="sm-callout-time">{w["label"]}</p>', unsafe_allow_html=True)
-                        st.markdown(
-                            f'<p class="sm-callout-meta">{w["weighted_views"]} views across '
-                            f'{w["video_count"]} video(s)</p>',
-                            unsafe_allow_html=True,
-                        )
-            st.markdown('<div style="height:24px"></div>', unsafe_allow_html=True)
-            st.bar_chart(posting_time["views_by_hour"], color=ACCENT_BLUE)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with sm_section("📈 Best posting time"):
+        posting_time = results["posting_time"]
+        if posting_time is None:
+            st.info("Analytics unavailable — connect a YouTube account to enable this.")
+        else:
+            with st.container(key="posting-panel"):
+                windows = posting_time["top_windows"]
+                callout_cols = st.columns(len(windows) or 1)
+                for i, col in enumerate(callout_cols):
+                    w = windows[i]
+                    with col:
+                        with st.container(key=f"callout-{i}"):
+                            rank_label = "Best window" if i == 0 else "Runner-up"
+                            st.markdown(f'<p class="sm-callout-label">{rank_label}</p>', unsafe_allow_html=True)
+                            st.markdown(f'<p class="sm-callout-time">{w["label"]}</p>', unsafe_allow_html=True)
+                            st.markdown(
+                                f'<p class="sm-callout-meta">{w["weighted_views"]} views across '
+                                f'{w["video_count"]} video(s)</p>',
+                                unsafe_allow_html=True,
+                            )
+                st.markdown('<div style="height:24px"></div>', unsafe_allow_html=True)
+                st.bar_chart(posting_time["views_by_hour"], color=ACCENT_BLUE)
 
-    st.markdown('<div class="sm-section">', unsafe_allow_html=True)
-    st.download_button(
-        "⬇️ Download all clips (.zip)",
-        data=_build_clips_zip(results["clip_paths"]),
-        file_name="shorts_miner_clips.zip",
-        mime="application/zip",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    with sm_section():
+        st.download_button(
+            "⬇️ Download all clips (.zip)",
+            data=_build_clips_zip(results["clip_paths"]),
+            file_name="shorts_miner_clips.zip",
+            mime="application/zip",
+        )

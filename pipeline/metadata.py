@@ -2,11 +2,10 @@
 
 Runnable standalone: python -m pipeline.metadata <youtube_url> [num_clips]
 """
-import json
 import logging
 import sys
 
-from utils.llm import LLMError, call_llm
+from utils.llm import LLMError, call_llm, parse_json_list
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -50,25 +49,7 @@ def _call_llm(prompt: str) -> str:
 
 
 def _parse_json_response(raw: str) -> list:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ClaudeMetadataResponseError(
-            f"Claude did not return valid JSON: {exc}\nRaw response: {raw[:500]}"
-        ) from exc
-
-    if not isinstance(data, list):
-        raise ClaudeMetadataResponseError(
-            f"Expected a JSON list of metadata objects from Claude, got {type(data).__name__}"
-        )
-    return data
+    return parse_json_list(raw, ClaudeMetadataResponseError)
 
 
 def _validate_metadata_item(item: dict) -> dict:

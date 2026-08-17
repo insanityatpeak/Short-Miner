@@ -586,6 +586,112 @@ def _escape_path_for_subtitles_filter(path: str) -> str:
         return abs_path.replace("\\", "/").replace(":", "\\:")
 
 
+def _probe_video_dimensions(path: str) -> tuple[int, int]:
+    try:
+        probe = ffmpeg.probe(path)
+        video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
+        return int(video_info["width"]), int(video_info["height"])
+    except (ffmpeg.Error, KeyError, StopIteration, ValueError) as exc:
+        raise VerticalReformatError(f"Could not probe video dimensions for {path}: {exc}") from exc
+
+
+def _compute_vertical_crop(
+    sample_path: str,
+    source_width: int,
+    source_height: int,
+    start_offset: float = 0.0,
+    duration: float | None = None,
+    log_context: str = "",
+) -> tuple[int, int, int, int]:
+    """Compute the (crop_width, crop_height, crop_x, crop_y) window for a 9:16
+    vertical crop of a source_width x source_height frame.
+
+    Samples face positions every ~1.5s (optionally restricted to
+    [start_offset, start_offset + duration) within sample_path) and uses the
+    median horizontal center as a single fixed crop offset — no per-frame
+    recropping, so the crop can't jitter. Falls back to a plain center-crop
+    if a face isn't reliably detected (below MIN_FACE_DETECTION_RATIO of
+    sampled frames). log_context is prefixed onto the log line so callers can
+    identify which clip/source window it refers to.
+    """
+    crop_width = _round_even(source_height * VERTICAL_ASPECT_W / VERTICAL_ASPECT_H)
+    if crop_width > source_width:
+        # Source is already narrower than 9:16 needs — crop height instead, keep full width.
+        crop_width = source_width
+        crop_height = _round_even(source_width * VERTICAL_ASPECT_H / VERTICAL_ASPECT_W)
+    else:
+        crop_height = source_height
+
+    x_centers, total_samples = _sample_face_x_centers(
+        sample_path, start_offset=start_offset, duration=duration
+    )
+    detection_ratio = (len(x_centers) / total_samples) if total_samples else 0.0
+
+    if detection_ratio >= MIN_FACE_DETECTION_RATIO:
+        crop_x = int(round(statistics.median(x_centers) - crop_width / 2))
+        crop_x = max(0, min(crop_x, source_width - crop_width))
+        logger.info(
+            "%sface detected in %d/%d sampled frames (%.0f%%); centering crop at x=%d",
+            log_context, len(x_centers), total_samples, detection_ratio * 100, crop_x,
+        )
+    else:
+        crop_x = max(0, (source_width - crop_width) // 2)
+        logger.info(
+            "%sface detected in only %d/%d sampled frames (%.0f%%, below %.0f%% threshold); "
+            "falling back to center-crop.",
+            log_context, len(x_centers), total_samples, detection_ratio * 100,
+            MIN_FACE_DETECTION_RATIO * 100,
+        )
+    crop_y = max(0, (source_height - crop_height) // 2)
+    return crop_width, crop_height, crop_x, crop_y
+
+
+def _maybe_write_captions_file(
+    captions: list[dict] | None, crop_width: int, crop_height: int, output_path: str
+) -> str | None:
+    if not captions:
+        return None
+    ass_path = f"{output_path}.tmp_captions.ass"
+    try:
+        _write_ass_file(captions, crop_width, crop_height, ass_path)
+    except OSError as exc:
+        raise CaptionGenerationError(f"Could not write subtitle file {ass_path}: {exc}") from exc
+    return ass_path
+
+
+def _encode_crop(
+    in_stream,
+    crop_width: int,
+    crop_height: int,
+    crop_x: int,
+    crop_y: int,
+    ass_path: str | None,
+    output_path: str,
+    error_context: str,
+    extra_output_kwargs: dict | None = None,
+) -> None:
+    """Run the crop (+ optional burned-in subtitles) ffmpeg filtergraph and
+    encode it to output_path, cleaning up the subtitle file afterward."""
+    video = ffmpeg.filter(in_stream.video, "crop", crop_width, crop_height, crop_x, crop_y)
+    if ass_path:
+        video = ffmpeg.filter(
+            video, "subtitles", filename=_escape_path_for_subtitles_filter(ass_path)
+        )
+    kwargs = {"vcodec": "libx264", "preset": "fast", "acodec": "aac"}
+    kwargs.update(extra_output_kwargs or {})
+    node = ffmpeg.output(video, in_stream.audio, output_path, **kwargs)
+    try:
+        ffmpeg.run(node, overwrite_output=True, quiet=True)
+    except ffmpeg.Error as exc:
+        stderr = exc.stderr.decode(errors="replace") if exc.stderr else str(exc)
+        raise VerticalReformatError(
+            f"ffmpeg failed {error_context}: {stderr[-500:]}"
+        ) from exc
+    finally:
+        if ass_path and os.path.exists(ass_path):
+            os.remove(ass_path)
+
+
 def reformat_vertical(clip_path: str, output_path: str, captions: list[dict] | None = None) -> str:
     """Crop a 16:9 clip to a 9:16 vertical frame, keeping the speaking subject in view,
     and optionally burn in phrase-level captions in the same encode pass.
@@ -609,73 +715,19 @@ def reformat_vertical(clip_path: str, output_path: str, captions: list[dict] | N
             "(ffmpeg cannot read and overwrite the same file in one pass)."
         )
 
-    try:
-        probe = ffmpeg.probe(clip_path)
-        video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
-        source_width = int(video_info["width"])
-        source_height = int(video_info["height"])
-    except (ffmpeg.Error, KeyError, StopIteration, ValueError) as exc:
-        raise VerticalReformatError(f"Could not probe video dimensions for {clip_path}: {exc}") from exc
-
-    crop_width = _round_even(source_height * VERTICAL_ASPECT_W / VERTICAL_ASPECT_H)
-    if crop_width > source_width:
-        # Source is already narrower than 9:16 needs — crop height instead, keep full width.
-        crop_width = source_width
-        crop_height = _round_even(source_width * VERTICAL_ASPECT_H / VERTICAL_ASPECT_W)
-    else:
-        crop_height = source_height
-
-    x_centers, total_samples = _sample_face_x_centers(clip_path)
-    detection_ratio = (len(x_centers) / total_samples) if total_samples else 0.0
-
-    if detection_ratio >= MIN_FACE_DETECTION_RATIO:
-        crop_x = int(round(statistics.median(x_centers) - crop_width / 2))
-        crop_x = max(0, min(crop_x, source_width - crop_width))
-        logger.info(
-            "%s: face detected in %d/%d sampled frames (%.0f%%); centering crop at x=%d",
-            clip_path, len(x_centers), total_samples, detection_ratio * 100, crop_x,
-        )
-    else:
-        crop_x = max(0, (source_width - crop_width) // 2)
-        logger.info(
-            "%s: face detected in only %d/%d sampled frames (%.0f%%, below %.0f%% threshold); "
-            "falling back to center-crop.",
-            clip_path, len(x_centers), total_samples, detection_ratio * 100,
-            MIN_FACE_DETECTION_RATIO * 100,
-        )
-    crop_y = max(0, (source_height - crop_height) // 2)
+    source_width, source_height = _probe_video_dimensions(clip_path)
+    crop_width, crop_height, crop_x, crop_y = _compute_vertical_crop(
+        clip_path, source_width, source_height, log_context=f"{clip_path}: "
+    )
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    ass_path = _maybe_write_captions_file(captions, crop_width, crop_height, output_path)
 
-    ass_path = None
-    if captions:
-        ass_path = f"{output_path}.tmp_captions.ass"
-        try:
-            _write_ass_file(captions, crop_width, crop_height, ass_path)
-        except OSError as exc:
-            raise CaptionGenerationError(f"Could not write subtitle file {ass_path}: {exc}") from exc
-
-    try:
-        in_stream = ffmpeg.input(clip_path)
-        video = ffmpeg.filter(in_stream.video, "crop", crop_width, crop_height, crop_x, crop_y)
-        if ass_path:
-            video = ffmpeg.filter(
-                video, "subtitles", filename=_escape_path_for_subtitles_filter(ass_path)
-            )
-        node = ffmpeg.output(
-            video, in_stream.audio, output_path,
-            vcodec="libx264", preset="fast", acodec="aac",
-        )
-        try:
-            ffmpeg.run(node, overwrite_output=True, quiet=True)
-        except ffmpeg.Error as exc:
-            stderr = exc.stderr.decode(errors="replace") if exc.stderr else str(exc)
-            raise VerticalReformatError(
-                f"ffmpeg failed reformatting {clip_path}: {stderr[-500:]}"
-            ) from exc
-    finally:
-        if ass_path and os.path.exists(ass_path):
-            os.remove(ass_path)
+    in_stream = ffmpeg.input(clip_path)
+    _encode_crop(
+        in_stream, crop_width, crop_height, crop_x, crop_y, ass_path, output_path,
+        error_context=f"reformatting {clip_path}",
+    )
 
     if not os.path.exists(output_path):
         raise VerticalReformatError(f"ffmpeg did not produce an output file: {output_path}")
@@ -714,76 +766,25 @@ def cut_and_reformat(
     if not os.path.exists(source_path):
         raise ClipCutError(f"Source video not found: {source_path}")
 
-    try:
-        probe = ffmpeg.probe(source_path)
-        video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
-        source_width = int(video_info["width"])
-        source_height = int(video_info["height"])
-    except (ffmpeg.Error, KeyError, StopIteration, ValueError) as exc:
-        raise VerticalReformatError(f"Could not probe video dimensions for {source_path}: {exc}") from exc
-
-    crop_width = _round_even(source_height * VERTICAL_ASPECT_W / VERTICAL_ASPECT_H)
-    if crop_width > source_width:
-        # Source is already narrower than 9:16 needs — crop height instead, keep full width.
-        crop_width = source_width
-        crop_height = _round_even(source_width * VERTICAL_ASPECT_H / VERTICAL_ASPECT_W)
-    else:
-        crop_height = source_height
-
+    source_width, source_height = _probe_video_dimensions(source_path)
     duration = end - start
-    x_centers, total_samples = _sample_face_x_centers(source_path, start_offset=start, duration=duration)
-    detection_ratio = (len(x_centers) / total_samples) if total_samples else 0.0
-
-    if detection_ratio >= MIN_FACE_DETECTION_RATIO:
-        crop_x = int(round(statistics.median(x_centers) - crop_width / 2))
-        crop_x = max(0, min(crop_x, source_width - crop_width))
-        logger.info(
-            "%s [%.1fs-%.1fs]: face detected in %d/%d sampled frames (%.0f%%); centering crop at x=%d",
-            source_path, start, end, len(x_centers), total_samples, detection_ratio * 100, crop_x,
-        )
-    else:
-        crop_x = max(0, (source_width - crop_width) // 2)
-        logger.info(
-            "%s [%.1fs-%.1fs]: face detected in only %d/%d sampled frames (%.0f%%, below %.0f%% "
-            "threshold); falling back to center-crop.",
-            source_path, start, end, len(x_centers), total_samples, detection_ratio * 100,
-            MIN_FACE_DETECTION_RATIO * 100,
-        )
-    crop_y = max(0, (source_height - crop_height) // 2)
+    crop_width, crop_height, crop_x, crop_y = _compute_vertical_crop(
+        source_path, source_width, source_height,
+        start_offset=start, duration=duration,
+        log_context=f"{source_path} [{start:.1f}s-{end:.1f}s]: ",
+    )
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     captions = build_caption_chunks(transcript, start, end) if transcript else None
-    ass_path = None
-    if captions:
-        ass_path = f"{output_path}.tmp_captions.ass"
-        try:
-            _write_ass_file(captions, crop_width, crop_height, ass_path)
-        except OSError as exc:
-            raise CaptionGenerationError(f"Could not write subtitle file {ass_path}: {exc}") from exc
+    ass_path = _maybe_write_captions_file(captions, crop_width, crop_height, output_path)
 
-    try:
-        in_stream = ffmpeg.input(source_path, ss=start, t=duration)
-        video = ffmpeg.filter(in_stream.video, "crop", crop_width, crop_height, crop_x, crop_y)
-        if ass_path:
-            video = ffmpeg.filter(
-                video, "subtitles", filename=_escape_path_for_subtitles_filter(ass_path)
-            )
-        node = ffmpeg.output(
-            video, in_stream.audio, output_path,
-            vcodec="libx264", preset="fast", acodec="aac",
-            avoid_negative_ts="make_zero",
-        )
-        try:
-            ffmpeg.run(node, overwrite_output=True, quiet=True)
-        except ffmpeg.Error as exc:
-            stderr = exc.stderr.decode(errors="replace") if exc.stderr else str(exc)
-            raise VerticalReformatError(
-                f"ffmpeg failed cutting/reformatting {source_path}: {stderr[-500:]}"
-            ) from exc
-    finally:
-        if ass_path and os.path.exists(ass_path):
-            os.remove(ass_path)
+    in_stream = ffmpeg.input(source_path, ss=start, t=duration)
+    _encode_crop(
+        in_stream, crop_width, crop_height, crop_x, crop_y, ass_path, output_path,
+        error_context=f"cutting/reformatting {source_path}",
+        extra_output_kwargs={"avoid_negative_ts": "make_zero"},
+    )
 
     if not os.path.exists(output_path):
         raise VerticalReformatError(f"ffmpeg did not produce an output file: {output_path}")

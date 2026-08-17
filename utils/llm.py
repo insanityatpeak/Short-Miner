@@ -9,6 +9,7 @@ replace the body of call_llm() below with an Anthropic Messages API call using
 utils.config.CLAUDE_MODEL and utils.config.require_anthropic_key(); no changes
 needed in scorer.py or metadata.py.
 """
+import json
 import logging
 
 from utils.config import GEMINI_MODEL, require_gemini_key
@@ -47,3 +48,33 @@ def call_llm(prompt: str) -> str:
         raise LLMError("Gemini returned an empty response.")
 
     return text
+
+
+def parse_json_list(raw: str, error_cls: type[Exception]) -> list:
+    """Parse an LLM's raw text response into a JSON list.
+
+    Strips a leading/trailing markdown code fence (with or without a `json`
+    language tag) if present, since LLMs routinely wrap JSON in one even when
+    told not to. Raises error_cls on invalid JSON or a non-list top level, so
+    callers (scorer.py, metadata.py) can pass their own exception type and
+    get consistent messages without duplicating this parsing.
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise error_cls(
+            f"LLM did not return valid JSON: {exc}\nRaw response: {raw[:500]}"
+        ) from exc
+
+    if not isinstance(data, list):
+        raise error_cls(
+            f"Expected a JSON list from the LLM, got {type(data).__name__}"
+        )
+    return data
