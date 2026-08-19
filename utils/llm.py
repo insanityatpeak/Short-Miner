@@ -21,6 +21,15 @@ class LLMError(Exception):
     """Raised when the underlying LLM call fails."""
 
 
+class LLMQuotaExceededError(LLMError):
+    """Raised when the LLM provider's rate limit/daily quota is exhausted.
+
+    Distinct from LLMError so app.py can show visitors of the public demo a
+    "come back tomorrow" message instead of a generic failure — this is
+    expected/recoverable, not a bug.
+    """
+
+
 def require_llm_key() -> str:
     """Fail-fast check for whichever key call_llm() actually needs right now.
 
@@ -35,12 +44,21 @@ def require_llm_key() -> str:
 def call_llm(prompt: str) -> str:
     """Send a single-turn prompt to the configured LLM and return its raw text response."""
     from google import genai
+    from google.genai import errors as genai_errors
 
     client = genai.Client(api_key=require_gemini_key())
 
     try:
         response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         text = response.text
+    except genai_errors.APIError as exc:
+        if exc.code == 429:
+            raise LLMQuotaExceededError(
+                "This demo's free-tier Gemini API quota is used up for today. "
+                "Please check back tomorrow — this isn't a bug, just a rate "
+                "limit on the shared free key."
+            ) from exc
+        raise LLMError(f"Gemini API call failed: {exc}") from exc
     except Exception as exc:
         raise LLMError(f"Gemini API call failed: {exc}") from exc
 

@@ -6,6 +6,7 @@ Run: streamlit run app.py
 import html
 import io
 import os
+import uuid
 import zipfile
 from contextlib import contextmanager
 
@@ -17,7 +18,7 @@ from pipeline.metadata import MetadataError, clip_transcript_text, generate_meta
 from pipeline.scorer import ScorerError, score_segments
 from pipeline.transcript import TranscriptError, get_last_transcript_method, get_transcript
 from utils.config import CLIPS_DIR, ConfigError
-from utils.llm import require_llm_key
+from utils.llm import LLMQuotaExceededError, require_llm_key
 
 NUM_CLIPS = 3
 ACCENT_BLUE = "#0070f3"
@@ -422,9 +423,12 @@ if run_clicked:
 
             status.write("⏳ Cutting clips...")
             source_path = download_video(url)
+            if "session_id" not in st.session_state:
+                st.session_state["session_id"] = uuid.uuid4().hex
+            session_clips_dir = os.path.join(CLIPS_DIR, st.session_state["session_id"])
             clip_paths = []
             for i, clip in enumerate(scored, start=1):
-                out_path = os.path.join(CLIPS_DIR, f"clip_{i}.mp4")
+                out_path = os.path.join(session_clips_dir, f"clip_{i}.mp4")
                 cut_and_reformat(
                     source_path, clip["start_time"], clip["end_time"], out_path,
                     transcript=transcript,
@@ -456,6 +460,8 @@ if run_clicked:
             "metadata": metadata,
             "posting_time": posting_time,
         }
+    except LLMQuotaExceededError as e:
+        st.warning(f"🕒 {e}")
     except TranscriptError as e:
         st.error(f"Couldn't get a transcript for this video: {e}\n\nTry a different URL.")
     except ScorerError as e:

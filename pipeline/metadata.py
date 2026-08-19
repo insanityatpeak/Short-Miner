@@ -5,7 +5,7 @@ Runnable standalone: python -m pipeline.metadata <youtube_url> [num_clips]
 import logging
 import sys
 
-from utils.llm import LLMError, call_llm, parse_json_list
+from utils.llm import LLMError, LLMQuotaExceededError, call_llm, parse_json_list
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -44,6 +44,8 @@ Respond with ONLY valid JSON, no markdown code fences, no preamble, no explanati
 def _call_llm(prompt: str) -> str:
     try:
         return call_llm(prompt)
+    except LLMQuotaExceededError:
+        raise
     except LLMError as exc:
         raise MetadataError(str(exc)) from exc
 
@@ -134,7 +136,7 @@ if __name__ == "__main__":
             for c in scored
         ]
         results = generate_metadata_batch(clips)
-    except (TranscriptError, ScorerError, MetadataError) as e:
+    except (TranscriptError, ScorerError, MetadataError, LLMQuotaExceededError) as e:
         print(f"ERROR: {e}")
         sys.exit(1)
 
