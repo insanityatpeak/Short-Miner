@@ -1,4 +1,5 @@
 .env
+.streamlit/secrets.toml
 output/
 .claude/settings.local.json
 __pycache__/
