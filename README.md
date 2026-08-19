@@ -15,9 +15,10 @@
 
 <div align="center">
 
-<video src="assets/demo.mp4" controls muted>
-  Your Markdown viewer doesn't support inline video — see <a href="assets/demo.mp4">assets/demo.mp4</a> directly.
+<video src="https://github.com/Priyanshu/Short-Miner/raw/main/assets/demo.mp4" autoplay loop controls muted playsinline>
+  Your Markdown viewer doesn't support inline video — see <a href="https://github.com/Priyanshu/Short-Miner/raw/main/assets/demo.mp4">the video</a> directly.
 </video>
+
 
 <sub>End-to-end run on a real video — download, scoring, cropping, captions, and metadata generation, all live. If the player above doesn't load, open <a href="assets/demo.mp4">assets/demo.mp4</a> directly.</sub>
 
