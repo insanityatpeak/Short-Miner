@@ -17,6 +17,12 @@ OUTPUT_DIR = "output"
 SOURCE_DIR = os.path.join(OUTPUT_DIR, "source")
 CLIPS_DIR = os.path.join(OUTPUT_DIR, "clips")
 
+# YouTube's default (web) extraction client increasingly demands a PO token
+# or bot-check sign-in and 403s/blocks yt-dlp without one; the android client
+# still serves formats without one. Used for every yt-dlp call in the
+# pipeline (video + audio) so both download paths degrade the same way.
+YTDLP_EXTRACTOR_ARGS = {"youtube": {"player_client": ["android"]}}
+
 YOUTUBE_ANALYTICS_CONFIGURED = bool(YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET)
 
 

@@ -3,9 +3,9 @@
 pipeline/scorer.py and pipeline/metadata.py call call_llm() and never touch a
 provider SDK directly. That keeps the provider swappable in one place.
 
-Currently backed by Gemini (free tier) per CLAUDE.md's temporary override.
-To swap back to Claude (the CLAUDE.md section 4 spec — model claude-sonnet-4-6),
-replace the body of call_llm() below with an Anthropic Messages API call using
+Currently backed by Gemini (free tier), a temporary substitute while Anthropic
+credits aren't available. To swap back to Claude, replace the body of
+call_llm() below with an Anthropic Messages API call using
 utils.config.CLAUDE_MODEL and utils.config.require_anthropic_key(); no changes
 needed in scorer.py or metadata.py.
 """
@@ -24,10 +24,10 @@ class LLMError(Exception):
 def require_llm_key() -> str:
     """Fail-fast check for whichever key call_llm() actually needs right now.
 
-    app.py calls this once at startup (per CLAUDE.md section 8) instead of
-    hardcoding require_anthropic_key() — that key isn't load-bearing while
-    the Gemini override in call_llm() below is active. Swap this call's body
-    to require_anthropic_key() when call_llm() is swapped back to Claude.
+    app.py calls this once at startup instead of hardcoding
+    require_anthropic_key() — that key isn't load-bearing while the Gemini
+    override in call_llm() below is active. Swap this call's body to
+    require_anthropic_key() when call_llm() is swapped back to Claude.
     """
     return require_gemini_key()
 

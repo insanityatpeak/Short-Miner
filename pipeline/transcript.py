@@ -124,6 +124,8 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
 
     import yt_dlp
 
+    from utils.config import YTDLP_EXTRACTOR_ARGS
+
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path_template = os.path.join(tmpdir, f"{video_id}.%(ext)s")
         ydl_opts = {
@@ -135,6 +137,7 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
             }],
             "quiet": True,
             "no_warnings": True,
+            "extractor_args": YTDLP_EXTRACTOR_ARGS,
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

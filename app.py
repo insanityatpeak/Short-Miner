@@ -1,10 +1,9 @@
 """Shorts Miner — Streamlit UI.
 
 Glues together transcript -> scorer -> clipper -> metadata -> analytics.
-Visual design tokens sourced from DESIGN.md (Vercel-inspired token set) — see
-STYLE below for the CSS mapping.
 Run: streamlit run app.py
 """
+import html
 import io
 import os
 import zipfile
@@ -25,16 +24,15 @@ ACCENT_BLUE = "#0070f3"
 
 st.set_page_config(page_title="Shorts Miner", page_icon="🎬", layout="wide")
 
-# --- DESIGN.md token mapping -------------------------------------------------
-# Colors, typography, spacing, and radii below are lifted 1:1 from DESIGN.md's
-# `colors` / `typography` / `spacing` / `rounded` blocks. Streamlit's own
-# widgets are restyled via data-testid selectors (best-effort — Streamlit
-# doesn't expose a public API for this, so testids can shift between
-# versions); custom elements (hero, cards, chips, callouts) are plain HTML
-# injected via st.markdown so they can match DESIGN.md's component specs
-# exactly. st.container(key=...) is used to visually group native widgets
-# (st.video, st.bar_chart) inside a styled card, since Streamlit elements
-# can't otherwise be nested inside hand-written HTML.
+# --- Design tokens -----------------------------------------------------------
+# Colors, typography, spacing, and radii below are a small Vercel-inspired
+# token set. Streamlit's own widgets are restyled via data-testid selectors
+# (best-effort — Streamlit doesn't expose a public API for this, so testids
+# can shift between versions); custom elements (hero, cards, chips, callouts)
+# are plain HTML injected via st.markdown so they can match the component
+# specs exactly. st.container(key=...) is used to visually group native
+# widgets (st.video, st.bar_chart) inside a styled card, since Streamlit
+# elements can't otherwise be nested inside hand-written HTML.
 STYLE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap');
@@ -394,9 +392,9 @@ run_clicked = st.button("Run", type="primary", disabled=not url)
 
 @contextmanager
 def sm_section(title: str | None = None):
-    """Wrap a page section in the DESIGN.md `.sm-section` div, with an
-    optional `.sm-section-title` heading. Keeps the open/close markup pair
-    together at one call site instead of three copies that can drift apart."""
+    """Wrap a page section in the `.sm-section` div, with an optional
+    `.sm-section-title` heading. Keeps the open/close markup pair together
+    at one call site instead of three copies that can drift apart."""
     st.markdown('<div class="sm-section">', unsafe_allow_html=True)
     if title:
         st.markdown(f'<p class="sm-section-title">{title}</p>', unsafe_allow_html=True)
@@ -479,13 +477,16 @@ if "results" in st.session_state:
                 with st.container(key=f"clip-card-{i}"):
                     st.video(results["clip_paths"][i])
                     meta = results["metadata"][i]
+                    title = html.escape(meta["title"])
+                    description = html.escape(meta["description"])
+                    reason = html.escape(results["scored"][i]["reason"])
                     st.markdown(f'<p class="sm-eyebrow">Clip {i + 1:02d}</p>', unsafe_allow_html=True)
-                    st.markdown(f'<p class="sm-card-title">{meta["title"]}</p>', unsafe_allow_html=True)
-                    st.markdown(f'<p class="sm-card-desc">{meta["description"]}</p>', unsafe_allow_html=True)
-                    chips = "".join(f'<span class="sm-chip">{h}</span>' for h in meta["hashtags"])
+                    st.markdown(f'<p class="sm-card-title">{title}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="sm-card-desc">{description}</p>', unsafe_allow_html=True)
+                    chips = "".join(f'<span class="sm-chip">{html.escape(h)}</span>' for h in meta["hashtags"])
                     st.markdown(f'<div class="sm-chip-row">{chips}</div>', unsafe_allow_html=True)
                     st.markdown(
-                        f'<p class="sm-card-reason">Why this clip: {results["scored"][i]["reason"]}</p>',
+                        f'<p class="sm-card-reason">Why this clip: {reason}</p>',
                         unsafe_allow_html=True,
                     )
 
