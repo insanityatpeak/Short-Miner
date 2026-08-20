@@ -18,10 +18,13 @@ SOURCE_DIR = os.path.join(OUTPUT_DIR, "source")
 CLIPS_DIR = os.path.join(OUTPUT_DIR, "clips")
 
 # YouTube's default (web) extraction client increasingly demands a PO token
-# or bot-check sign-in and 403s/blocks yt-dlp without one; the android client
-# still serves formats without one. Used for every yt-dlp call in the
-# pipeline (video + audio) so both download paths degrade the same way.
-YTDLP_EXTRACTOR_ARGS = {"youtube": {"player_client": ["android"]}}
+# or bot-check sign-in and 403s/blocks yt-dlp without one. Which non-web
+# client still serves formats without one shifts over time and by IP
+# reputation (cloud/datacenter IPs like Streamlit Community Cloud's get
+# blocked more aggressively than residential ones); every yt-dlp call in the
+# pipeline goes through utils.ytdlp_client.extract_with_client_fallback,
+# which retries across CLIENT_FALLBACK_ORDER on a 403 instead of pinning one
+# client.
 
 YOUTUBE_ANALYTICS_CONFIGURED = bool(YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET)
 

@@ -124,7 +124,7 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
 
     import yt_dlp
 
-    from utils.config import YTDLP_EXTRACTOR_ARGS
+    from utils.ytdlp_client import extract_with_client_fallback
 
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path_template = os.path.join(tmpdir, f"{video_id}.%(ext)s")
@@ -137,11 +137,9 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
             }],
             "quiet": True,
             "no_warnings": True,
-            "extractor_args": YTDLP_EXTRACTOR_ARGS,
         }
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([youtube_url])
+            extract_with_client_fallback(ydl_opts, youtube_url, download=True)
         except yt_dlp.utils.DownloadError as exc:
             raise VideoUnavailableError(
                 f"Could not download audio for video {video_id}: {exc}"

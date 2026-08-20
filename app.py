@@ -13,10 +13,27 @@ from contextlib import contextmanager
 import streamlit as st
 
 from pipeline.analytics import get_best_posting_time
-from pipeline.clipper import ClipperError, cut_and_reformat, download_video
-from pipeline.metadata import MetadataError, clip_transcript_text, generate_metadata_batch
-from pipeline.scorer import ScorerError, score_segments
-from pipeline.transcript import TranscriptError, get_last_transcript_method, get_transcript
+from pipeline.clipper import ClipperError, VideoDownloadError, cut_and_reformat, download_video
+from pipeline.metadata import (
+    ClaudeMetadataResponseError,
+    MetadataError,
+    clip_transcript_text,
+    generate_metadata_batch,
+)
+from pipeline.scorer import (
+    ClaudeResponseError,
+    InsufficientSegmentsError,
+    ScorerError,
+    score_segments,
+)
+from pipeline.transcript import (
+    InvalidYouTubeURLError,
+    TranscriptError,
+    TranscriptUnavailableError,
+    VideoUnavailableError,
+    get_last_transcript_method,
+    get_transcript,
+)
 from utils.config import CLIPS_DIR, ConfigError
 from utils.llm import LLMQuotaExceededError, require_llm_key
 
@@ -403,6 +420,56 @@ def sm_section(title: str | None = None):
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def _friendly_reason(exc: Exception) -> str:
+    """Plain-language likely cause for a pipeline failure, shown under the
+    error so it reads as "here's what's going on" rather than "the app is
+    broken" — most failures here are external (YouTube, the AI provider, or
+    the specific video), not bugs in Shorts Miner."""
+    msg = str(exc)
+
+    if "403" in msg or "Forbidden" in msg:
+        return (
+            "YouTube is temporarily blocking video downloads from this server's IP "
+            "address — common on shared/cloud hosting, and not a bug in Shorts "
+            "Miner. It usually clears up on its own; try again in a bit, or with "
+            "a different video."
+        )
+    if isinstance(exc, VideoUnavailableError):
+        return (
+            "The video itself is private, deleted, age-restricted, or blocked in "
+            "this region — nothing Shorts Miner can work around."
+        )
+    if isinstance(exc, InvalidYouTubeURLError):
+        return (
+            "That doesn't look like a URL Shorts Miner recognizes — check it's a "
+            "youtube.com/watch, youtu.be, or /shorts/ link."
+        )
+    if isinstance(exc, TranscriptUnavailableError):
+        return (
+            "This video has no YouTube captions, and the local speech-to-text "
+            "fallback couldn't transcribe it either (e.g. no spoken dialogue, or "
+            "unsupported audio) — some videos just can't be processed this way."
+        )
+    if isinstance(exc, InsufficientSegmentsError):
+        return "This video (or its usable transcript) is too short to pull out separate highlight clips."
+    if isinstance(exc, VideoDownloadError):
+        return (
+            "The source video couldn't be downloaded from YouTube right now — "
+            "usually a transient block or hiccup on YouTube's side, not a bug "
+            "here. Try again in a bit."
+        )
+    if isinstance(exc, (ClaudeResponseError, ClaudeMetadataResponseError)):
+        return (
+            "The AI model returned a response Shorts Miner couldn't parse — an "
+            "occasional hiccup with the model, not a bug. Try again."
+        )
+    return (
+        "This is most likely a temporary issue with YouTube, the AI model "
+        "provider, or this specific video — not a bug in Shorts Miner. Try "
+        "again, or with a different video."
+    )
+
+
 def _build_clips_zip(clip_paths: list[str]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -464,12 +531,16 @@ if run_clicked:
         st.warning(f"🕒 {e}")
     except TranscriptError as e:
         st.error(f"Couldn't get a transcript for this video: {e}\n\nTry a different URL.")
+        st.caption(f"ℹ️ {_friendly_reason(e)}")
     except ScorerError as e:
         st.error(f"Couldn't identify moments in this video: {e}")
+        st.caption(f"ℹ️ {_friendly_reason(e)}")
     except ClipperError as e:
         st.error(f"Couldn't cut clips from this video: {e}")
+        st.caption(f"ℹ️ {_friendly_reason(e)}")
     except MetadataError as e:
         st.error(f"Couldn't generate titles/descriptions for these clips: {e}")
+        st.caption(f"ℹ️ {_friendly_reason(e)}")
 
 if "results" in st.session_state:
     results = st.session_state["results"]

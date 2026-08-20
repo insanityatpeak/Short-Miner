@@ -13,7 +13,8 @@ import tempfile
 import ffmpeg
 
 from pipeline.transcript import extract_video_id
-from utils.config import CLIPS_DIR, SOURCE_DIR, YTDLP_EXTRACTOR_ARGS
+from utils.config import CLIPS_DIR, SOURCE_DIR
+from utils.ytdlp_client import extract_with_client_fallback
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -121,15 +122,9 @@ def download_video(youtube_url: str, output_path: str = SOURCE_DIR) -> str:
         "outtmpl": outtmpl,
         "quiet": True,
         "no_warnings": True,
-        # See utils.config.YTDLP_EXTRACTOR_ARGS. Caps resolution at ~360p
-        # (YouTube's SABR-only rollout withholds higher formats from the
-        # android client too without a token) — an external constraint,
-        # not something fixable on our end.
-        "extractor_args": YTDLP_EXTRACTOR_ARGS,
     }
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
+        info = extract_with_client_fallback(ydl_opts, youtube_url, download=True)
     except yt_dlp.utils.DownloadError as exc:
         raise VideoDownloadError(f"Could not download video {video_id}: {exc}") from exc
 
