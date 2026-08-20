@@ -426,8 +426,18 @@ def _friendly_reason(exc: Exception) -> str:
     broken" — most failures here are external (YouTube, the AI provider, or
     the specific video), not bugs in Shorts Miner."""
     msg = str(exc)
+    msg_lower = msg.lower()
 
-    if "403" in msg or "Forbidden" in msg:
+    if "sign in to confirm" in msg_lower or "not a bot" in msg_lower:
+        return (
+            "YouTube's bot-check is challenging this server's shared IP address "
+            "(common on cloud hosting like this demo) — it isn't specific to this "
+            "video or a bug in Shorts Miner. It sometimes clears up on retry, but "
+            "may keep happening for videos without captions (which need this "
+            "download step) until the host's IP falls out of YouTube's suspicion "
+            "window."
+        )
+    if "403" in msg or "forbidden" in msg_lower:
         return (
             "YouTube is temporarily blocking video downloads from this server's IP "
             "address — common on shared/cloud hosting, and not a bug in Shorts "
