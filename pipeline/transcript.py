@@ -141,7 +141,10 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
         try:
             extract_with_client_fallback(ydl_opts, youtube_url, download=True)
         except yt_dlp.utils.DownloadError as exc:
-            raise VideoUnavailableError(
+            # Not VideoUnavailableError: the video itself may be perfectly fine —
+            # this is a download-side failure (bot-check, IP block, etc.), same
+            # category as captions already having failed above.
+            raise TranscriptUnavailableError(
                 f"Could not download audio for video {video_id}: {exc}"
             ) from exc
 

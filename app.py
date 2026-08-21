@@ -480,6 +480,17 @@ def _friendly_reason(exc: Exception) -> str:
     )
 
 
+def _show_pipeline_error(headline: str, exc: Exception) -> None:
+    """Show a pipeline failure as a plain-language headline first, with the raw
+    exception tucked into a collapsed expander — not the reverse. Most of these
+    failures are external (YouTube, the AI provider) and the raw yt-dlp/API text
+    (cookie-export links, stack-shaped messages) reads as "the app is broken"
+    when shown as the primary line."""
+    st.error(f"{headline} {_friendly_reason(exc)}")
+    with st.expander("Technical details"):
+        st.code(str(exc))
+
+
 def _build_clips_zip(clip_paths: list[str]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -540,17 +551,13 @@ if run_clicked:
     except LLMQuotaExceededError as e:
         st.warning(f"🕒 {e}")
     except TranscriptError as e:
-        st.error(f"Couldn't get a transcript for this video: {e}\n\nTry a different URL.")
-        st.caption(f"ℹ️ {_friendly_reason(e)}")
+        _show_pipeline_error("Couldn't get a transcript for this video.", e)
     except ScorerError as e:
-        st.error(f"Couldn't identify moments in this video: {e}")
-        st.caption(f"ℹ️ {_friendly_reason(e)}")
+        _show_pipeline_error("Couldn't identify moments in this video.", e)
     except ClipperError as e:
-        st.error(f"Couldn't cut clips from this video: {e}")
-        st.caption(f"ℹ️ {_friendly_reason(e)}")
+        _show_pipeline_error("Couldn't cut clips from this video.", e)
     except MetadataError as e:
-        st.error(f"Couldn't generate titles/descriptions for these clips: {e}")
-        st.caption(f"ℹ️ {_friendly_reason(e)}")
+        _show_pipeline_error("Couldn't generate titles/descriptions for these clips.", e)
 
 if "results" in st.session_state:
     results = st.session_state["results"]
