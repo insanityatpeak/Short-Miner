@@ -1,12 +1,13 @@
 """Shared yt-dlp download-with-client-fallback helper.
 
-YouTube periodically blocks one player client's requests — either with a
-plain 403, or with its "Sign in to confirm you're not a bot" challenge —
-while others still work, and which client is currently blocked shifts
-without notice (see utils.config's note on the android client for the
-last-known state). Both video and audio download paths in this codebase go
-through extract_with_client_fallback() instead of hard-failing on the first
-client that gets blocked.
+YouTube periodically blocks one player client's requests — with a plain 403,
+its "Sign in to confirm you're not a bot" challenge, a broken player response
+("The page needs to be reloaded"), or a formats list that's missing anything
+usable ("Requested format is not available") — while others still work, and
+which client is currently blocked shifts without notice (see utils.config's
+note on the android client for the last-known state). Both video and audio
+download paths in this codebase go through extract_with_client_fallback()
+instead of hard-failing on the first client that gets blocked.
 """
 import logging
 
@@ -27,6 +28,8 @@ _BLOCKED_CLIENT_MARKERS = (
     "forbidden",
     "sign in to confirm",
     "not a bot",
+    "the page needs to be reloaded",
+    "requested format is not available",
 )
 
 
