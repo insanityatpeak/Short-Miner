@@ -76,6 +76,7 @@ Fill in `.env`:
 | `GEMINI_API_KEY` | **Yes** | The pipeline's active LLM key. Get one free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). |
 | `ANTHROPIC_API_KEY` | No | Present in `.env.example` for when the provider is swapped back to Claude (see note above). |
 | `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` | No | Only needed for the best-posting-time analytics panel. Without them, the rest of the app still works and the panel shows "Analytics unavailable" instead of crashing. |
+| `PROXY_URL` | No | Routes yt-dlp and caption fetching through an HTTP/SOCKS5 proxy (e.g. `http://user:pass@host:port`), for when YouTube blocks this host's IP outright rather than just one yt-dlp client. Not needed unless you're seeing persistent "Sign in to confirm you're not a bot" errors even after retries. |
 
 Make sure `ffmpeg` is installed and on your system `PATH` (`ffmpeg -version` should work in a terminal) — it's not installed via pip.
 

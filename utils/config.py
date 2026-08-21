@@ -10,6 +10,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
 YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 
+# Optional: route yt-dlp and youtube_transcript_api through an HTTP/SOCKS5
+# proxy (e.g. http://user:pass@host:port) to work around YouTube blocking
+# this host's IP outright — see utils.ytdlp_client and pipeline.transcript.
+# Unset by default; the pipeline works without it as long as the host IP
+# isn't currently in YouTube's bad graces.
+PROXY_URL = os.getenv("PROXY_URL")
+
 CLAUDE_MODEL = "claude-sonnet-4-6"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 

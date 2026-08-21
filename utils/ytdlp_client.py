@@ -8,10 +8,15 @@ which client is currently blocked shifts without notice (see utils.config's
 note on the android client for the last-known state). Both video and audio
 download paths in this codebase go through extract_with_client_fallback()
 instead of hard-failing on the first client that gets blocked.
+
+If utils.config.PROXY_URL is set, every attempt is routed through it —
+useful when the host's IP itself (not just one client) is blocked.
 """
 import logging
 
 import yt_dlp
+
+from utils.config import PROXY_URL
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,8 @@ def extract_with_client_fallback(ydl_opts: dict, youtube_url: str, download: boo
     last_exc: yt_dlp.utils.DownloadError | None = None
     for i, client in enumerate(CLIENT_FALLBACK_ORDER):
         opts = {**ydl_opts, "extractor_args": {"youtube": {"player_client": [client]}}}
+        if PROXY_URL and "proxy" not in opts:
+            opts["proxy"] = PROXY_URL
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(youtube_url, download=download)

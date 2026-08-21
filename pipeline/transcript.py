@@ -14,6 +14,9 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled,
     VideoUnavailable,
 )
+from youtube_transcript_api.proxies import GenericProxyConfig
+
+from utils.config import PROXY_URL
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -88,8 +91,13 @@ def extract_video_id(youtube_url: str) -> str:
 
 def _fetch_captions(video_id: str) -> list[dict]:
     """Fetch captions via youtube_transcript_api, preferring English but falling back to
-    whatever transcript is available (manual or auto-generated)."""
-    api = YouTubeTranscriptApi()
+    whatever transcript is available (manual or auto-generated).
+
+    Routed through PROXY_URL (utils.config) when set, same as the yt-dlp paths —
+    useful when this host's IP itself is blocked, not just one yt-dlp client.
+    """
+    proxy_config = GenericProxyConfig(http_url=PROXY_URL, https_url=PROXY_URL) if PROXY_URL else None
+    api = YouTubeTranscriptApi(proxy_config=proxy_config)
     transcript_list = api.list(video_id)
 
     try:
