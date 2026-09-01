@@ -6,6 +6,8 @@ import logging
 import os
 import re
 import sys
+import threading
+from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -16,14 +18,36 @@ from youtube_transcript_api._errors import (
 )
 from youtube_transcript_api.proxies import GenericProxyConfig
 
-from utils.config import PROXY_URL
+from utils.config import PROXY_URL, WHISPER_MODEL_SIZE
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 VIDEO_ID_RE = re.compile(r"^[0-9A-Za-z_-]{11}$")
 PREFERRED_LANGUAGES = ("en", "en-US", "en-GB", "en-orig")
-WHISPER_MODEL_SIZE = "base"
+
+# Cap on how much audio Whisper actually transcribes. Uncapped, a full
+# long-form video has no realistic time ceiling on a CPU-only host (measured
+# 8+ minutes for a single short video under light concurrent load on
+# Streamlit Community Cloud's free tier) — enough runway for the scorer's
+# candidate windows either way, since it only needs a handful of usable
+# 30-60s moments, not the whole transcript.
+MAX_WHISPER_AUDIO_SECONDS = 600
+
+# Only one Whisper transcription runs at a time per process. Concurrent
+# visitors hitting the fallback simultaneously were observed starving each
+# other for the host's single shared vCPU (one session's yt-dlp download
+# stalled 8 minutes waiting for CPU behind another session's transcription)
+# rather than each just running proportionally slower — serializing turns
+# that into a predictable queue instead.
+_whisper_semaphore = threading.Semaphore(1)
+
+ProgressCallback = Callable[[str], None]
+
+
+def _noop_progress(_msg: str) -> None:
+    pass
+
 
 # Set by get_transcript() on its most recent call; lets callers (e.g. the
 # Streamlit UI) report which method produced the transcript without changing
@@ -119,7 +143,27 @@ def _fetch_captions(video_id: str) -> list[dict]:
     ]
 
 
-def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
+def _trim_audio(audio_path: str, max_seconds: int) -> str:
+    """Truncate audio_path to at most max_seconds in place, via a fast stream-copy
+    (no re-encode). Returns audio_path unchanged if trimming fails for any reason —
+    transcribing the untrimmed file is preferable to hard-failing the fallback."""
+    import ffmpeg
+
+    trimmed_path = f"{audio_path}.trimmed.mp3"
+    try:
+        ffmpeg.input(audio_path, t=max_seconds).output(
+            trimmed_path, acodec="copy"
+        ).run(overwrite_output=True, quiet=True)
+    except ffmpeg.Error:
+        return audio_path
+    if not os.path.exists(trimmed_path):
+        return audio_path
+    return trimmed_path
+
+
+def _fetch_via_whisper(
+    youtube_url: str, video_id: str, on_progress: ProgressCallback = _noop_progress
+) -> list[dict]:
     """Fallback: download audio with yt-dlp, transcribe locally with Whisper."""
     import tempfile
 
@@ -146,6 +190,7 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
             "quiet": True,
             "no_warnings": True,
         }
+        on_progress("⏳ No captions found — downloading audio for local transcription...")
         try:
             extract_with_client_fallback(ydl_opts, youtube_url, download=True)
         except yt_dlp.utils.DownloadError as exc:
@@ -161,10 +206,21 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
             raise TranscriptUnavailableError(
                 f"Audio download for video {video_id} did not produce an mp3 file."
             )
+        audio_path = _trim_audio(audio_path, MAX_WHISPER_AUDIO_SECONDS)
 
-        logger.info("Transcribing audio locally with Whisper (%s model)...", WHISPER_MODEL_SIZE)
-        model = whisper.load_model(WHISPER_MODEL_SIZE)
-        result = model.transcribe(audio_path)
+        if not _whisper_semaphore.acquire(blocking=False):
+            on_progress(
+                "⏳ Another transcription is already running on this server — "
+                "waiting for it to finish before starting..."
+            )
+            _whisper_semaphore.acquire()
+        try:
+            on_progress(f"⏳ Transcribing audio locally with Whisper ({WHISPER_MODEL_SIZE} model)...")
+            logger.info("Transcribing audio locally with Whisper (%s model)...", WHISPER_MODEL_SIZE)
+            model = whisper.load_model(WHISPER_MODEL_SIZE)
+            result = model.transcribe(audio_path)
+        finally:
+            _whisper_semaphore.release()
 
         segments = [
             {
@@ -178,16 +234,25 @@ def _fetch_via_whisper(youtube_url: str, video_id: str) -> list[dict]:
         return segments
 
 
-def get_transcript(youtube_url: str) -> list[dict]:
+def get_transcript(
+    youtube_url: str, on_progress: ProgressCallback = _noop_progress
+) -> list[dict]:
     """Get a transcript for a YouTube video as a list of {text, start, duration} dicts.
 
     Tries YouTube captions first; falls back to a local Whisper transcription of the
     downloaded audio if no captions are available. Raises TranscriptError subclasses
     on failure so callers (e.g. the Streamlit UI) can show a friendly message.
+
+    on_progress, if given, is called with short human-readable strings at each phase
+    transition (fetching captions, falling back to Whisper, downloading audio,
+    transcribing) — the Whisper fallback in particular can take several minutes, and
+    without visible progress a caller has no way to distinguish "still working" from
+    "stuck".
     """
     global _last_method
     video_id = extract_video_id(youtube_url)
 
+    on_progress("⏳ Fetching transcript...")
     try:
         segments = _fetch_captions(video_id)
         _last_method = "captions"
@@ -202,7 +267,7 @@ def get_transcript(youtube_url: str) -> list[dict]:
         logger.info("Caption fetch failed for %s (%s); falling back to Whisper.", video_id, exc)
 
     try:
-        segments = _fetch_via_whisper(youtube_url, video_id)
+        segments = _fetch_via_whisper(youtube_url, video_id, on_progress=on_progress)
         _last_method = "whisper"
         return segments
     except TranscriptError:

@@ -17,6 +17,13 @@ YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 # isn't currently in YouTube's bad graces.
 PROXY_URL = os.getenv("PROXY_URL")
 
+# Whisper model size for the local speech-to-text fallback (pipeline.transcript).
+# "tiny" by default: on Streamlit Community Cloud's CPU-only, single-shared-vCPU
+# free tier, "base" measured 8+ minutes to transcribe a single short video under
+# light concurrent load — "tiny" trades some accuracy for finishing in a
+# realistic time. Override via secret/env if a host with more CPU is used.
+WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "tiny")
+
 CLAUDE_MODEL = "claude-sonnet-4-6"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 

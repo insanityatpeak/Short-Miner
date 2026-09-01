@@ -502,7 +502,7 @@ def _build_clips_zip(clip_paths: list[str]) -> bytes:
 if run_clicked:
     try:
         with st.status("Running Shorts Miner...", expanded=True) as status:
-            transcript = get_transcript(url)
+            transcript = get_transcript(url, on_progress=status.write)
             method = get_last_transcript_method() or "unknown"
             status.write(f"✅ Transcript loaded ({len(transcript)} segments, via {method})")
 
