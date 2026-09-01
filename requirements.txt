@@ -3,6 +3,25 @@ youtube-transcript-api==1.2.4
 yt-dlp>=2026.8.19
 ffmpeg-python==0.2.0
 openai-whisper==20250625
+
+# openai-whisper pulls in torch, and torch's default PyPI wheel drags ~2GB of
+# CUDA/nvidia packages that are dead weight on a CPU-only host like Streamlit
+# Community Cloud (the Whisper fallback logs "FP16 is not supported on CPU"
+# every run — there is no GPU to use them). This installs the CPU-only build
+# instead, purely to cut install size and rebuild time; runtime behavior is
+# unchanged.
+#
+# Deliberately a single direct-URL pin rather than an --extra-index-url: the
+# PyTorch index also serves numpy, pillow, and setuptools (the latter capped
+# well below the version resolved here), and uv's default first-index strategy
+# would silently source those from it too.
+#
+# The marker scopes this to the exact interpreter/platform the wheel is built
+# for. Anywhere else — local Windows dev, or if Cloud moves off Python 3.14 —
+# the line is skipped and torch resolves normally from PyPI as a transitive
+# dependency of openai-whisper, so a mismatch degrades to the old behavior
+# rather than breaking the build.
+torch @ https://download.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp314-cp314-manylinux_2_28_x86_64.whl ; sys_platform == "linux" and python_version == "3.14"
 anthropic==1.2.0
 google-genai==2.21.0
 google-api-python-client==2.200.0
