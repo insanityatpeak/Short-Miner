@@ -26,20 +26,15 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 VIDEO_ID_RE = re.compile(r"^[0-9A-Za-z_-]{11}$")
 PREFERRED_LANGUAGES = ("en", "en-US", "en-GB", "en-orig")
 
-# Cap on how much audio Whisper actually transcribes. Uncapped, a full
-# long-form video has no realistic time ceiling on a CPU-only host (measured
-# 8+ minutes for a single short video under light concurrent load on
-# Streamlit Community Cloud's free tier) — enough runway for the scorer's
-# candidate windows either way, since it only needs a handful of usable
-# 30-60s moments, not the whole transcript.
-MAX_WHISPER_AUDIO_SECONDS = 600
-
 # Only one Whisper transcription runs at a time per process. Concurrent
 # visitors hitting the fallback simultaneously were observed starving each
 # other for the host's single shared vCPU (one session's yt-dlp download
 # stalled 8 minutes waiting for CPU behind another session's transcription)
 # rather than each just running proportionally slower — serializing turns
-# that into a predictable queue instead.
+# that into a predictable queue instead. Whisper still transcribes the full
+# downloaded audio (no duration cap): a visitor queued behind another's
+# transcription sees an explicit "please wait" status instead, so the
+# tradeoff is a possibly long queue rather than a truncated transcript.
 _whisper_semaphore = threading.Semaphore(1)
 
 ProgressCallback = Callable[[str], None]
@@ -143,24 +138,6 @@ def _fetch_captions(video_id: str) -> list[dict]:
     ]
 
 
-def _trim_audio(audio_path: str, max_seconds: int) -> str:
-    """Truncate audio_path to at most max_seconds in place, via a fast stream-copy
-    (no re-encode). Returns audio_path unchanged if trimming fails for any reason —
-    transcribing the untrimmed file is preferable to hard-failing the fallback."""
-    import ffmpeg
-
-    trimmed_path = f"{audio_path}.trimmed.mp3"
-    try:
-        ffmpeg.input(audio_path, t=max_seconds).output(
-            trimmed_path, acodec="copy"
-        ).run(overwrite_output=True, quiet=True)
-    except ffmpeg.Error:
-        return audio_path
-    if not os.path.exists(trimmed_path):
-        return audio_path
-    return trimmed_path
-
-
 def _fetch_via_whisper(
     youtube_url: str, video_id: str, on_progress: ProgressCallback = _noop_progress
 ) -> list[dict]:
@@ -206,12 +183,11 @@ def _fetch_via_whisper(
             raise TranscriptUnavailableError(
                 f"Audio download for video {video_id} did not produce an mp3 file."
             )
-        audio_path = _trim_audio(audio_path, MAX_WHISPER_AUDIO_SECONDS)
 
         if not _whisper_semaphore.acquire(blocking=False):
             on_progress(
-                "⏳ Another transcription is already running on this server — "
-                "waiting for it to finish before starting..."
+                "⏳ Someone else's video is currently being processed — please "
+                "kindly wait, yours will start automatically as soon as it's done."
             )
             _whisper_semaphore.acquire()
         try:
