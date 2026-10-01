@@ -31,8 +31,11 @@ WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "tiny")
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
-GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+# Free-tier model catalogs churn (Llama 3.3 was retired from both), so these
+# are env-overridable: check https://api.groq.com/openai/v1/models and
+# https://openrouter.ai/api/v1/models (":free" suffix) if one starts 404ing.
+GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
 GROQ_WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
 
 OUTPUT_DIR = "output"

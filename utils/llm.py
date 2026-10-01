@@ -146,16 +146,22 @@ def call_llm(prompt: str) -> str:
     Each free tier fails in its own way (daily quota, a model pulled from the
     free tier, a project denied access), so any LLMError moves on to the next
     configured provider. If every provider fails, the first provider's error
-    is raised, since that's the one app.py's friendly messages describe.
+    type is raised, with the fallbacks' failure reasons appended.
     """
-    first_error: LLMError | None = None
+    failures: list[tuple[str, LLMError]] = []
     for name, call in _providers():
         try:
             return call(prompt)
         except LLMError as exc:
             logger.warning("%s failed (%s); trying the next LLM provider.", name, exc)
-            first_error = first_error or exc
-    assert first_error is not None
+            failures.append((name, exc))
+
+    first_error = failures[0][1]
+    if len(failures) > 1:
+        # Keep the first error's type (app.py's friendly message keys off it),
+        # but don't hide why the fallbacks failed too.
+        details = "; ".join(f"{name}: {exc}" for name, exc in failures[1:])
+        raise type(first_error)(f"{first_error} (fallbacks also failed — {details})") from first_error
     raise first_error
 
 

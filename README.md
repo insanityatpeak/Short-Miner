@@ -51,7 +51,7 @@ Turning a long-form video into Shorts normally means rewatching the whole thing 
 | Video download / cut | `yt-dlp` + `ffmpeg-python` (wraps the system `ffmpeg` binary — not installed via pip) |
 | Vertical crop | OpenCV Haar-cascade face detection for a stable, subject-centered 9:16 crop |
 | Captions | Burned in via ffmpeg's `subtitles` filter, from a generated `.ass` file |
-| LLM | Gemini (`gemini-3.5-flash-lite`) → Groq (`llama-3.3-70b-versatile`) → OpenRouter (free model), via `utils/llm.py` — see note below |
+| LLM | Gemini (`gemini-3.5-flash-lite`) → Groq (`openai/gpt-oss-120b`) → OpenRouter (free model), via `utils/llm.py` — see note below |
 | YouTube analytics | `google-api-python-client` + `google-auth-oauthlib` (OAuth2, YouTube Data API v3), authenticated against the presenter's own channel |
 | Tests | `pytest`, all network/LLM calls mocked |
 
