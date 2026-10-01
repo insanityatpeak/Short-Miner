@@ -380,6 +380,9 @@ def get_transcript(
 
 
 if __name__ == "__main__":
+    from utils.cli import use_utf8_output
+
+    use_utf8_output()
     if len(sys.argv) != 2:
         print("Usage: python -m pipeline.transcript <youtube_url>")
         sys.exit(1)

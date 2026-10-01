@@ -188,6 +188,9 @@ def score_segments(transcript: list[dict], num_clips: int = 3) -> list[dict]:
 
 
 if __name__ == "__main__":
+    from utils.cli import use_utf8_output
+
+    use_utf8_output()
     if len(sys.argv) not in (2, 3):
         print("Usage: python -m pipeline.scorer <youtube_url> [num_clips]")
         sys.exit(1)

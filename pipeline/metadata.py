@@ -118,6 +118,9 @@ def clip_transcript_text(transcript: list[dict], start: float, end: float) -> st
 
 
 if __name__ == "__main__":
+    from utils.cli import use_utf8_output
+
+    use_utf8_output()
     if len(sys.argv) not in (2, 3):
         print("Usage: python -m pipeline.metadata <youtube_url> [num_clips]")
         sys.exit(1)

@@ -97,6 +97,9 @@ def get_authenticated_service():
 
 
 if __name__ == "__main__":
+    from utils.cli import use_utf8_output
+
+    use_utf8_output()
     try:
         service = get_authenticated_service()
         response = service.channels().list(part="snippet,statistics", mine=True).execute()

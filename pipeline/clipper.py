@@ -844,6 +844,9 @@ def cut_and_reformat(
 
 
 if __name__ == "__main__":
+    from utils.cli import use_utf8_output
+
+    use_utf8_output()
     if len(sys.argv) not in (4, 5):
         print("Usage: python -m pipeline.clipper <youtube_url> <start> <end> [output_name]")
         sys.exit(1)

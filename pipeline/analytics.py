@@ -128,6 +128,9 @@ def get_best_posting_time(channel_id: str | None = None) -> dict | None:
 
 
 if __name__ == "__main__":
+    from utils.cli import use_utf8_output
+
+    use_utf8_output()
     result = get_best_posting_time()
     if result is None:
         print("Analytics unavailable — connect a YouTube account to enable this.")

@@ -391,6 +391,11 @@ except ConfigError as e:
     st.error(f"⚠️ {e}")
     st.stop()
 
+st.info(
+    "**Note:** Access is limited to users logged in through Cloudflare. Groq has "
+    "limited API quota, so we appreciate access being used by genuinely interested users."
+)
+
 st.markdown(
     """
     <div class="sm-hero">

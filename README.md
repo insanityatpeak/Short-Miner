@@ -93,13 +93,21 @@ streamlit run app.py
 
 YouTube blocks cloud/datacenter IPs (see "Known limitations"), but not home connections. Running the app on your own machine and exposing it with a free Cloudflare quick tunnel gives you a public `https://….trycloudflare.com` link, and YouTube sees your residential IP. No Cloudflare account is needed.
 
-```bash
-winget install --id Cloudflare.cloudflared   # macOS: brew install cloudflared
-streamlit run app.py                          # terminal 1
-cloudflared tunnel --url http://localhost:8501   # terminal 2: prints the public URL
+Install `cloudflared` once (`winget install --id Cloudflare.cloudflared`), then on Windows:
+
+```powershell
+.un_public.ps1
 ```
 
-The link only works while both commands are running and your machine is awake, and it changes on each restart. For a fixed URL, create a named tunnel on a domain you own in Cloudflare (`cloudflared tunnel login`, then `cloudflared tunnel create shorts-miner`).
+This starts Streamlit and the tunnel together and prints the public URL; Ctrl+C stops both. It clears `PROXY_URL` for the run (pass `-KeepProxy` to keep it), since the point is for YouTube to see your own IP. On other platforms, run `streamlit run app.py` and `cloudflared tunnel --url http://localhost:8501` in two terminals.
+
+The quick-tunnel URL changes on every start, and the link only works while your machine is on. For a fixed URL, add a domain to your Cloudflare account and run once:
+
+```powershell
+.un_public.ps1 -Setup -Hostname shorts.example.com
+```
+
+Every later `.un_public.ps1` reuses that named tunnel. To require a login, add a self-hosted application for that hostname under Cloudflare Zero Trust → Access → Applications, with an allow policy listing the permitted emails (free for up to 50 users).
 
 ## How to run it
 
