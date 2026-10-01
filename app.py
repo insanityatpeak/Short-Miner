@@ -31,10 +31,11 @@ from pipeline.transcript import (
     TranscriptError,
     TranscriptUnavailableError,
     VideoUnavailableError,
+    extract_video_id,
     get_last_transcript_method,
     get_transcript,
 )
-from utils.config import CLIPS_DIR, ConfigError
+from utils.config import CLIPS_DIR, SOURCE_DIR, ConfigError
 from utils.llm import LLMAccessDeniedError, LLMQuotaExceededError, require_llm_key
 
 NUM_CLIPS = 3
@@ -405,6 +406,13 @@ st.markdown(
 )
 
 url = st.text_input("YouTube video URL", placeholder="https://www.youtube.com/watch?v=...")
+uploaded_video = st.file_uploader(
+    "Optional: upload the video file",
+    type=["mp4", "mov", "mkv", "webm"],
+    help="YouTube often blocks downloads from this server's IP. If the run fails at "
+    "'Cutting clips', download the video yourself, upload it here, and click Run again — "
+    "captions and AI analysis still come from the URL above.",
+)
 run_clicked = st.button("Run", type="primary", disabled=not url)
 
 
@@ -472,8 +480,9 @@ def _friendly_reason(exc: Exception) -> str:
     if isinstance(exc, VideoDownloadError):
         return (
             "The source video couldn't be downloaded from YouTube right now — "
-            "usually a transient block or hiccup on YouTube's side, not a bug "
-            "here. Try again in a bit."
+            "YouTube commonly blocks downloads from this server's IP, which is not "
+            "a bug here. Download the video yourself, upload it in the file box "
+            "above, and click Run again."
         )
     if isinstance(exc, (ClaudeResponseError, ClaudeMetadataResponseError)):
         return (
@@ -517,9 +526,17 @@ if run_clicked:
             status.write(f"✅ Top {len(scored)} moments identified")
 
             status.write("⏳ Cutting clips...")
-            source_path = download_video(url)
             if "session_id" not in st.session_state:
                 st.session_state["session_id"] = uuid.uuid4().hex
+            if uploaded_video is not None:
+                upload_dir = os.path.join(SOURCE_DIR, st.session_state["session_id"])
+                os.makedirs(upload_dir, exist_ok=True)
+                ext = os.path.splitext(uploaded_video.name)[1].lower()
+                with open(os.path.join(upload_dir, f"{extract_video_id(url)}{ext}"), "wb") as fh:
+                    fh.write(uploaded_video.getbuffer())
+                source_path = download_video(url, output_path=upload_dir)
+            else:
+                source_path = download_video(url)
             session_clips_dir = os.path.join(CLIPS_DIR, st.session_state["session_id"])
             clip_paths = []
             for i, clip in enumerate(scored, start=1):
