@@ -1,10 +1,12 @@
-"""Pulls/parses video transcripts: YouTube captions first, local Whisper as a fallback.
+"""Pulls/parses video transcripts: YouTube captions first, Whisper (Groq-hosted or local) as a fallback.
 
 Runnable standalone: python -m pipeline.transcript <youtube_url>
 """
+import functools
 import logging
 import os
 import re
+import subprocess
 import sys
 import threading
 from typing import Callable
@@ -18,7 +20,7 @@ from youtube_transcript_api._errors import (
 )
 from youtube_transcript_api.proxies import GenericProxyConfig
 
-from utils.config import PROXY_URL, WHISPER_MODEL_SIZE
+from utils.config import GROQ_API_KEY, GROQ_WHISPER_MODEL, PROXY_URL, WHISPER_MODEL_SIZE
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -38,6 +40,9 @@ PREFERRED_LANGUAGES = ("en", "en-US", "en-GB", "en-orig")
 _whisper_semaphore = threading.Semaphore(1)
 
 ProgressCallback = Callable[[str], None]
+
+GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+GROQ_CHUNK_SECONDS = 1200
 
 
 def _noop_progress(_msg: str) -> None:
@@ -181,13 +186,98 @@ def _fetch_via_whisper(
 
 
 def _transcribe_file(media_path: str, on_progress: ProgressCallback = _noop_progress) -> list[dict]:
-    """Transcribe a local audio or video file with Whisper (which decodes any
-    ffmpeg-readable container, so an uploaded .mp4 works as-is)."""
+    """Transcribe a local audio or video file (any ffmpeg-readable container,
+    so an uploaded .mp4 works as-is).
+
+    Uses Groq's hosted Whisper when GROQ_API_KEY is set (seconds, not minutes,
+    and none of this host's CPU), falling back to local faster-whisper if Groq
+    is unconfigured or fails (quota, network, oversized file).
+    """
+    if GROQ_API_KEY:
+        try:
+            on_progress("⏳ Transcribing audio with Groq Whisper...")
+            return _transcribe_with_groq(media_path)
+        except Exception as exc:
+            logger.warning("Groq transcription failed (%s); falling back to local Whisper.", exc)
+    return _transcribe_locally(media_path, on_progress=on_progress)
+
+
+def _media_duration(media_path: str) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", media_path],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return float(out)
+
+
+def _transcribe_with_groq(media_path: str) -> list[dict]:
+    """Transcribe via Groq's OpenAI-compatible audio endpoint.
+
+    Groq's free tier caps uploads at 25MB, so the audio is re-encoded to
+    16kHz mono 32kbps mp3 (what Whisper resamples to anyway) and sent in
+    GROQ_CHUNK_SECONDS chunks (~4.8MB each); each chunk's segment times are
+    offset by where the chunk starts. Chunks are cut with -ss per chunk rather
+    than ffmpeg's segment muxer so the offsets are exact, not packet-rounded.
+    """
+    import tempfile
+
+    import httpx
+
+    duration = _media_duration(media_path)
+    segments: list[dict] = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        offset = 0.0
+        index = 0
+        while offset < duration:
+            chunk_path = os.path.join(tmpdir, f"chunk_{index:03d}.mp3")
+            subprocess.run(
+                ["ffmpeg", "-v", "error", "-y", "-ss", str(offset), "-t", str(GROQ_CHUNK_SECONDS),
+                 "-i", media_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", chunk_path],
+                check=True,
+            )
+            with open(chunk_path, "rb") as f:
+                resp = httpx.post(
+                    GROQ_TRANSCRIBE_URL,
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                    files={"file": (os.path.basename(chunk_path), f, "audio/mpeg")},
+                    data={"model": GROQ_WHISPER_MODEL, "response_format": "verbose_json"},
+                    timeout=300,
+                )
+            resp.raise_for_status()
+            for seg in resp.json().get("segments", []):
+                text = seg["text"].strip()
+                if text:
+                    segments.append({
+                        "text": text,
+                        "start": offset + float(seg["start"]),
+                        "duration": float(seg["end"]) - float(seg["start"]),
+                    })
+            offset += GROQ_CHUNK_SECONDS
+            index += 1
+
+    if not segments:
+        raise TranscriptUnavailableError("Groq returned no transcript segments.")
+    logger.info("Transcribed via Groq Whisper (%d segments)", len(segments))
+    return segments
+
+
+@functools.lru_cache(maxsize=1)
+def _load_local_model():
+    from faster_whisper import WhisperModel
+
+    # int8 on CPU: ~3-4x faster than openai-whisper at the same model size,
+    # with no torch dependency.
+    return WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
+
+
+def _transcribe_locally(media_path: str, on_progress: ProgressCallback = _noop_progress) -> list[dict]:
+    """Transcribe on this host's CPU with faster-whisper."""
     try:
-        import whisper
+        import faster_whisper  # noqa: F401
     except ImportError as exc:
         raise TranscriptUnavailableError(
-            "No captions available and openai-whisper is not installed for the fallback."
+            "No captions available and faster-whisper is not installed for the fallback."
         ) from exc
 
     if not _whisper_semaphore.acquire(blocking=False):
@@ -198,21 +288,21 @@ def _transcribe_file(media_path: str, on_progress: ProgressCallback = _noop_prog
         _whisper_semaphore.acquire()
     try:
         on_progress(f"⏳ Transcribing audio locally with Whisper ({WHISPER_MODEL_SIZE} model)...")
-        logger.info("Transcribing audio locally with Whisper (%s model)...", WHISPER_MODEL_SIZE)
-        model = whisper.load_model(WHISPER_MODEL_SIZE)
-        result = model.transcribe(media_path)
+        logger.info("Transcribing audio locally with faster-whisper (%s model)...", WHISPER_MODEL_SIZE)
+        raw_segments, _info = _load_local_model().transcribe(media_path)
+        # transcribe() returns a lazy generator; consume it inside the lock.
+        segments = [
+            {
+                "text": seg.text.strip(),
+                "start": float(seg.start),
+                "duration": float(seg.end) - float(seg.start),
+            }
+            for seg in raw_segments
+        ]
     finally:
         _whisper_semaphore.release()
 
-    segments = [
-        {
-            "text": seg["text"].strip(),
-            "start": float(seg["start"]),
-            "duration": float(seg["end"]) - float(seg["start"]),
-        }
-        for seg in result["segments"]
-    ]
-    logger.info("Transcribed via Whisper (%d segments)", len(segments))
+    logger.info("Transcribed via local Whisper (%d segments)", len(segments))
     return segments
 
 

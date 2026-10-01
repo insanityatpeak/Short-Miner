@@ -7,6 +7,11 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Optional free-tier fallbacks. GROQ_API_KEY is used twice: for fast hosted
+# Whisper transcription (pipeline.transcript) and as the first LLM fallback
+# behind Gemini (utils.llm). OPENROUTER_API_KEY is the last LLM fallback.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
 YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 
@@ -26,6 +31,9 @@ WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "tiny")
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
+GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+GROQ_WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
 
 OUTPUT_DIR = "output"
 SOURCE_DIR = os.path.join(OUTPUT_DIR, "source")

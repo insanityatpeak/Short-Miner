@@ -60,3 +60,37 @@ def test_get_transcript_uses_local_media_instead_of_downloading(monkeypatch):
     assert transcribed == ["upload.mp4"]
     assert segments == [{"text": "hi", "start": 0.0, "duration": 1.0}]
     assert t.get_last_transcript_method() == "whisper"
+
+
+def test_groq_transcription_offsets_each_chunk(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from pipeline import transcript as t
+
+    monkeypatch.setattr(t, "GROQ_API_KEY", "g")
+    monkeypatch.setattr(t, "GROQ_CHUNK_SECONDS", 100)
+    monkeypatch.setattr(t, "_media_duration", lambda path: 150.0)
+    monkeypatch.setattr(t.subprocess, "run", lambda cmd, **kw: open(cmd[-1], "wb").close())
+    resp = MagicMock()
+    resp.json.return_value = {"segments": [{"text": " hello ", "start": 1.0, "end": 3.0}]}
+    monkeypatch.setattr("httpx.post", lambda *a, **kw: resp)
+
+    segments = t._transcribe_file("video.mp4")
+
+    assert segments == [
+        {"text": "hello", "start": 1.0, "duration": 2.0},
+        {"text": "hello", "start": 101.0, "duration": 2.0},
+    ]
+
+
+def test_groq_failure_falls_back_to_local_whisper(monkeypatch):
+    from pipeline import transcript as t
+
+    def boom(path):
+        raise RuntimeError("429")
+
+    monkeypatch.setattr(t, "GROQ_API_KEY", "g")
+    monkeypatch.setattr(t, "_transcribe_with_groq", boom)
+    monkeypatch.setattr(t, "_transcribe_locally", lambda path, on_progress=None: ["local"])
+
+    assert t._transcribe_file("video.mp4") == ["local"]
