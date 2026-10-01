@@ -237,14 +237,60 @@ def _round_even(x: float) -> int:
     return n if n % 2 == 0 else n - 1
 
 
+def _normalize_word(text: str) -> str:
+    return re.sub(r"[^\w%$]", "", text.lower())
+
+
+def _align_word_timings(words: list[str], timed: list[dict]) -> list[tuple[float, float]] | None:
+    """Match each display word to one or more consecutive timed tokens.
+
+    Whisper sometimes tokenizes differently from its own segment text (local
+    faster-whisper gives "93" + "%" for "93%"), so tokens are merged until
+    their normalized text equals the word's. Returns one (start, end) per word,
+    or None if the texts don't line up, so the caller can fall back.
+    """
+    if not words or not timed:
+        return None
+    out = []
+    i = 0
+    for word in words:
+        target = _normalize_word(word)
+        if i >= len(timed):
+            return None
+        start, end, acc = timed[i]["start"], timed[i]["end"], _normalize_word(timed[i]["text"])
+        i += 1
+        while acc != target and i < len(timed) and target.startswith(acc):
+            acc += _normalize_word(timed[i]["text"])
+            end = timed[i]["end"]
+            i += 1
+        if acc != target:
+            return None
+        out.append((start, end))
+    return out if i == len(timed) else None
+
+
 def _split_segment_into_words(segment: dict) -> list[dict]:
     """Split one transcript segment's [start, start+duration] across its words.
 
-    Proportional-by-character-count split, not real speech alignment: no
-    Whisper/forced-alignment involved. Returns word dicts with absolute
-    (source-video-timeline) start/end in seconds.
+    Uses real per-word timings when the segment carries them (Whisper
+    transcripts do, under "words") and they line up one-to-one with the
+    segment text's words. Display text always comes from the segment text, since
+    word-level output can drop punctuation; only the timings are borrowed.
+    Otherwise (YouTube captions, or timings that can't be matched to the text)
+    falls back to a proportional-by-character-count split.
+    Returns word dicts with absolute (source-video-timeline) start/end in seconds.
     """
     words = segment["text"].split()
+    aligned = _align_word_timings(words, segment.get("words") or [])
+    if aligned:
+        seg_end = segment["start"] + segment["duration"]
+        return [
+            # Clamped so a clamped segment (see _clamp_segment_durations) still
+            # can't put a word on screen alongside the next segment's.
+            {"text": word, "start": min(start, seg_end), "end": min(end, seg_end)}
+            for word, (start, end) in zip(words, aligned)
+        ]
+
     total_chars = sum(len(w) for w in words)
     if not words or total_chars == 0:
         return []
@@ -384,11 +430,11 @@ def build_caption_chunks(
 ) -> list[dict]:
     """Build phrase-level burned-caption chunks for a clip from existing transcript segments.
 
-    Uses only the segment-level {text, start, duration} data transcript.py already
-    produces (YouTube captions) — no Whisper or forced alignment. Segment durations
+    Uses the {text, start, duration} segments transcript.py produces, plus real
+    per-word timings when a Whisper transcript supplies them. Segment durations
     are first clamped so overlapping auto-caption windows can't bleed into the next
     segment (see _clamp_segment_durations). Per-word timing within each segment is
-    then a proportional-by-character-count split; words are merged into unbreakable
+    taken from those word timings, or else estimated (see _split_segment_into_words); words are merged into unbreakable
     units (proper nouns, number+word) before being packed into 3-5 word phrase
     chunks, so entities and numbers never split across a chunk boundary. Each
     chunk's first word is capitalized; existing punctuation from the source

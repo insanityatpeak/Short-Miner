@@ -439,10 +439,11 @@ def _friendly_reason(exc: Exception) -> str:
 
     if isinstance(exc, LLMAccessDeniedError):
         return (
-            "The AI provider (Gemini) has rejected this demo's API key — the "
-            "key's project was denied access. This is a configuration problem "
-            "on the host's side, not something retrying or a different video "
-            "will fix; the app owner needs to replace GEMINI_API_KEY."
+            "The AI provider rejected this demo's API key (and any configured "
+            "fallback providers failed too — see the details below). This is a "
+            "configuration problem on the host's side, not something retrying "
+            "or a different video will fix; the app owner needs to replace the "
+            "rejected key or add a working GROQ_API_KEY / OPENROUTER_API_KEY."
         )
     if "sign in to confirm" in msg_lower or "not a bot" in msg_lower:
         return (

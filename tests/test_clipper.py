@@ -183,3 +183,43 @@ def test_unbreakable_units_does_not_merge_sentence_initial_article():
     unit_texts = [[w["text"] for w in u] for u in units]
     assert ["The"] in unit_texts
     assert ["United", "States"] in unit_texts
+
+
+def test_split_segment_uses_real_word_timings_and_keeps_punctuation():
+    from pipeline.clipper import _split_segment_into_words
+
+    seg = {
+        "text": "Hello, world.", "start": 10.0, "duration": 2.0,
+        "words": [{"text": "Hello", "start": 10.0, "end": 10.3}, {"text": "world", "start": 11.5, "end": 13.0}],
+    }
+    assert _split_segment_into_words(seg) == [
+        {"text": "Hello,", "start": 10.0, "end": 10.3},
+        # end clamped to the segment's (possibly clamped) end
+        {"text": "world.", "start": 11.5, "end": 12.0},
+    ]
+
+
+def test_split_segment_merges_split_tokens():
+    from pipeline.clipper import _split_segment_into_words
+
+    seg = {
+        "text": "costs $1,200", "start": 0.0, "duration": 1.0,
+        "words": [{"text": "costs", "start": 0.0, "end": 0.4}, {"text": "$1", "start": 0.4, "end": 0.6},
+                  {"text": ",200", "start": 0.6, "end": 0.9}],
+    }
+    assert _split_segment_into_words(seg) == [
+        {"text": "costs", "start": 0.0, "end": 0.4},
+        {"text": "$1,200", "start": 0.4, "end": 0.9},
+    ]
+
+
+def test_split_segment_falls_back_to_estimate_when_text_differs():
+    from pipeline.clipper import _split_segment_into_words
+
+    seg = {
+        "text": "costs money", "start": 0.0, "duration": 1.0,
+        "words": [{"text": "costs", "start": 0.0, "end": 0.4}, {"text": "cash", "start": 0.4, "end": 0.9}],
+    }
+    words = _split_segment_into_words(seg)
+    assert [w["text"] for w in words] == ["costs", "money"]
+    assert words[0]["end"] == pytest.approx(5 / 10)

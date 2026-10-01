@@ -72,14 +72,19 @@ def test_groq_transcription_offsets_each_chunk(monkeypatch):
     monkeypatch.setattr(t, "_media_duration", lambda path: 150.0)
     monkeypatch.setattr(t.subprocess, "run", lambda cmd, **kw: open(cmd[-1], "wb").close())
     resp = MagicMock()
-    resp.json.return_value = {"segments": [{"text": " hello ", "start": 1.0, "end": 3.0}]}
+    resp.json.return_value = {
+        "segments": [{"text": " hello ", "start": 1.0, "end": 3.0}],
+        "words": [{"word": "hello", "start": 1.5, "end": 2.5}],
+    }
     monkeypatch.setattr("httpx.post", lambda *a, **kw: resp)
 
     segments = t._transcribe_file("video.mp4")
 
     assert segments == [
-        {"text": "hello", "start": 1.0, "duration": 2.0},
-        {"text": "hello", "start": 101.0, "duration": 2.0},
+        {"text": "hello", "start": 1.0, "duration": 2.0,
+         "words": [{"text": "hello", "start": 1.5, "end": 2.5}]},
+        {"text": "hello", "start": 101.0, "duration": 2.0,
+         "words": [{"text": "hello", "start": 101.5, "end": 102.5}]},
     ]
 
 

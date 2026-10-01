@@ -241,17 +241,31 @@ def _transcribe_with_groq(media_path: str) -> list[dict]:
                     GROQ_TRANSCRIBE_URL,
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                     files={"file": (os.path.basename(chunk_path), f, "audio/mpeg")},
-                    data={"model": GROQ_WHISPER_MODEL, "response_format": "verbose_json"},
+                    data={
+                        "model": GROQ_WHISPER_MODEL,
+                        "response_format": "verbose_json",
+                        "timestamp_granularities[]": ["segment", "word"],
+                    },
                     timeout=300,
                 )
             resp.raise_for_status()
-            for seg in resp.json().get("segments", []):
+            body = resp.json()
+            # Groq returns words as one flat list, not nested per segment.
+            chunk_words = [
+                {"text": w["word"].strip(), "start": offset + float(w["start"]), "end": offset + float(w["end"])}
+                for w in body.get("words", [])
+                if w["word"].strip()
+            ]
+            for seg in body.get("segments", []):
                 text = seg["text"].strip()
                 if text:
+                    start = offset + float(seg["start"])
+                    end = offset + float(seg["end"])
                     segments.append({
                         "text": text,
-                        "start": offset + float(seg["start"]),
-                        "duration": float(seg["end"]) - float(seg["start"]),
+                        "start": start,
+                        "duration": end - start,
+                        "words": [w for w in chunk_words if start <= w["start"] < end],
                     })
             offset += GROQ_CHUNK_SECONDS
             index += 1
@@ -289,13 +303,18 @@ def _transcribe_locally(media_path: str, on_progress: ProgressCallback = _noop_p
     try:
         on_progress(f"⏳ Transcribing audio locally with Whisper ({WHISPER_MODEL_SIZE} model)...")
         logger.info("Transcribing audio locally with faster-whisper (%s model)...", WHISPER_MODEL_SIZE)
-        raw_segments, _info = _load_local_model().transcribe(media_path)
+        raw_segments, _info = _load_local_model().transcribe(media_path, word_timestamps=True)
         # transcribe() returns a lazy generator; consume it inside the lock.
         segments = [
             {
                 "text": seg.text.strip(),
                 "start": float(seg.start),
                 "duration": float(seg.end) - float(seg.start),
+                "words": [
+                    {"text": w.word.strip(), "start": float(w.start), "end": float(w.end)}
+                    for w in (seg.words or [])
+                    if w.word.strip()
+                ],
             }
             for seg in raw_segments
         ]
