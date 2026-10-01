@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Ordered by observed reliability without a PO token. Kept short: each retry
 # re-does a full extract_info/download, so this trades a bit of latency on a
 # bad day for actually working instead of hard-failing on one blocked client.
-CLIENT_FALLBACK_ORDER = ["android", "ios", "tv", "web_safari"]
+CLIENT_FALLBACK_ORDER = ["android", "ios", "visionos", "tv", "web_safari"]
 
 # Substrings (lowercased) that mark a DownloadError as "this client is
 # blocked, try the next one" rather than a real failure (bad URL, private
