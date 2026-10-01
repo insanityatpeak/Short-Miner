@@ -30,6 +30,14 @@ class LLMQuotaExceededError(LLMError):
     """
 
 
+class LLMAccessDeniedError(LLMError):
+    """Raised when the provider rejects the API key/project outright (401/403).
+
+    Distinct so app.py doesn't mistake Gemini's "403 PERMISSION_DENIED" for a
+    YouTube 403 — the fix is a new/valid key, not retrying.
+    """
+
+
 def require_llm_key() -> str:
     """Fail-fast check for whichever key call_llm() actually needs right now.
 
@@ -58,6 +66,8 @@ def call_llm(prompt: str) -> str:
                 "Please check back tomorrow — this isn't a bug, just a rate "
                 "limit on the shared free key."
             ) from exc
+        if exc.code in (401, 403):
+            raise LLMAccessDeniedError(f"Gemini API call failed: {exc}") from exc
         raise LLMError(f"Gemini API call failed: {exc}") from exc
     except Exception as exc:
         raise LLMError(f"Gemini API call failed: {exc}") from exc

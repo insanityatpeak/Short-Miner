@@ -35,7 +35,7 @@ from pipeline.transcript import (
     get_transcript,
 )
 from utils.config import CLIPS_DIR, ConfigError
-from utils.llm import LLMQuotaExceededError, require_llm_key
+from utils.llm import LLMAccessDeniedError, LLMQuotaExceededError, require_llm_key
 
 NUM_CLIPS = 3
 ACCENT_BLUE = "#0070f3"
@@ -428,6 +428,13 @@ def _friendly_reason(exc: Exception) -> str:
     msg = str(exc)
     msg_lower = msg.lower()
 
+    if isinstance(exc, LLMAccessDeniedError):
+        return (
+            "The AI provider (Gemini) has rejected this demo's API key — the "
+            "key's project was denied access. This is a configuration problem "
+            "on the host's side, not something retrying or a different video "
+            "will fix; the app owner needs to replace GEMINI_API_KEY."
+        )
     if "sign in to confirm" in msg_lower or "not a bot" in msg_lower:
         return (
             "YouTube's bot-check is challenging this server's shared IP address "
@@ -550,6 +557,8 @@ if run_clicked:
         }
     except LLMQuotaExceededError as e:
         st.warning(f"🕒 {e}")
+    except LLMAccessDeniedError as e:
+        _show_pipeline_error("The AI provider rejected this demo's API key.", e)
     except TranscriptError as e:
         _show_pipeline_error("Couldn't get a transcript for this video.", e)
     except ScorerError as e:
