@@ -231,9 +231,21 @@ def _fetch_via_whisper(
             # Not VideoUnavailableError: the video itself may be perfectly fine —
             # this is a download-side failure (bot-check, IP block, etc.), same
             # category as captions already having failed above.
-            raise TranscriptUnavailableError(
-                f"Could not download audio for video {video_id}: {exc}"
-            ) from exc
+            # Blocked IP: try free public Piped/Invidious instances for audio.
+            from utils.public_media import download_from_public_frontends
+
+            on_progress("⏳ YouTube blocked the audio download — trying public Piped/Invidious instances...")
+            try:
+                m4a_path = os.path.join(tmpdir, f"{video_id}.m4a")
+                download_from_public_frontends(video_id, m4a_path, audio_only=True)
+                return _transcribe_file(m4a_path, on_progress=on_progress)
+            except TranscriptError:
+                raise
+            except Exception as fallback_exc:
+                raise TranscriptUnavailableError(
+                    f"Could not download audio for video {video_id}: {exc} | "
+                    f"public-instance fallback also failed: {fallback_exc}"
+                ) from exc
 
         audio_path = os.path.join(tmpdir, f"{video_id}.mp3")
         if not os.path.exists(audio_path):

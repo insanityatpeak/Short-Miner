@@ -14,6 +14,7 @@ import ffmpeg
 
 from pipeline.transcript import extract_video_id
 from utils.config import CLIPS_DIR, SOURCE_DIR
+from utils.public_media import download_from_public_frontends
 from utils.ytdlp_client import extract_with_client_fallback
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,18 @@ def download_video(youtube_url: str, output_path: str = SOURCE_DIR) -> str:
     try:
         info = extract_with_client_fallback(ydl_opts, youtube_url, download=True)
     except yt_dlp.utils.DownloadError as exc:
-        raise VideoDownloadError(f"Could not download video {video_id}: {exc}") from exc
+        # yt-dlp is blocked (typically a cloud IP): try free public Piped/Invidious
+        # instances before giving up and asking the user to upload the video.
+        logger.warning("yt-dlp download failed (%s); trying public Piped/Invidious instances.", exc)
+        try:
+            download_from_public_frontends(
+                video_id, os.path.join(output_path, f"{video_id}.mp4"), max_height=PREFERRED_HEIGHT
+            )
+        except Exception as fallback_exc:
+            raise VideoDownloadError(
+                f"Could not download video {video_id}: {exc} | public-instance fallback also failed: {fallback_exc}"
+            ) from exc
+        return os.path.join(output_path, f"{video_id}.mp4")
 
     downloaded = _find_cached(output_path, video_id)
     if not downloaded:
