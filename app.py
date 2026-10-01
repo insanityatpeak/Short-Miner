@@ -474,18 +474,21 @@ def _friendly_reason(exc: Exception) -> str:
         )
     if isinstance(exc, TranscriptUnavailableError):
         return (
-            "This video has no YouTube captions, and the local speech-to-text "
-            "fallback couldn't transcribe it either (e.g. no spoken dialogue, or "
-            "unsupported audio) — some videos just can't be processed this way."
+            "No captions could be fetched — neither directly from YouTube nor from "
+            "the free third-party service youtube-transcript.ai (which has "
+            "fair-use rate limits and only covers public videos with captions) — "
+            "and speech-to-text couldn't run either. Upload the video file above "
+            "and run again to transcribe it with Whisper."
         )
     if isinstance(exc, InsufficientSegmentsError):
         return "This video (or its usable transcript) is too short to pull out separate highlight clips."
     if isinstance(exc, VideoDownloadError):
         return (
-            "The source video couldn't be downloaded from YouTube right now — "
-            "YouTube commonly blocks downloads from this server's IP, which is not "
-            "a bug here. Download the video yourself, upload it in the file box "
-            "above, and click Run again."
+            "The transcript was found, but the source video couldn't be downloaded "
+            "from YouTube — it blocks downloads from cloud server IPs like this "
+            "one, which is not a bug here. Cutting clips needs the video file, so "
+            "download the video yourself, upload it in the file box above, and "
+            "click Run again."
         )
     if isinstance(exc, (ClaudeResponseError, ClaudeMetadataResponseError)):
         return (

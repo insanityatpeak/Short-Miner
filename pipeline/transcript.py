@@ -143,6 +143,65 @@ def _fetch_captions(video_id: str) -> list[dict]:
     ]
 
 
+PUBLIC_TRANSCRIPT_URL = "https://youtube-transcript.ai/transcript/{video_id}.txt"
+_PUBLIC_LINE_RE = re.compile(r"^\[(\d+(?::\d{2}){1,2})\]\s*(.+)$")
+_PUBLIC_DURATION_RE = re.compile(r"Duration:\s*(\d+(?::\d{2}){1,2})")
+_LAST_SEGMENT_FALLBACK_SECONDS = 5.0
+
+
+def _clock_to_seconds(clock: str) -> float:
+    seconds = 0
+    for part in clock.split(":"):
+        seconds = seconds * 60 + int(part)
+    return float(seconds)
+
+
+def _parse_public_transcript(markdown: str) -> list[dict]:
+    """Parse youtube-transcript.ai's timestamped Markdown ("[M:SS] paragraph")
+    into {text, start, duration} segments. Each duration runs to the next
+    paragraph's start; the last uses the header's total Duration if present."""
+    total = _PUBLIC_DURATION_RE.search(markdown)
+    starts_texts = [
+        (_clock_to_seconds(m.group(1)), m.group(2).strip())
+        for m in (_PUBLIC_LINE_RE.match(line.strip()) for line in markdown.splitlines())
+        if m
+    ]
+    segments = []
+    for i, (start, text) in enumerate(starts_texts):
+        if i + 1 < len(starts_texts):
+            end = starts_texts[i + 1][0]
+        elif total and _clock_to_seconds(total.group(1)) > start:
+            end = _clock_to_seconds(total.group(1))
+        else:
+            end = start + _LAST_SEGMENT_FALLBACK_SECONDS
+        segments.append({"text": text, "start": start, "duration": max(end - start, 0.0)})
+    return segments
+
+
+def _fetch_captions_public(video_id: str) -> list[dict]:
+    """Fetch captions from the free third-party youtube-transcript.ai service.
+
+    Doesn't contact YouTube from this host, so it works from cloud IPs YouTube
+    blocks. Limits: undocumented fair-use rate limits (low-volume use only),
+    public videos with captions only, and timestamps are paragraph-level
+    (coarser than YouTube's own caption lines).
+    """
+    import httpx
+
+    resp = httpx.get(
+        PUBLIC_TRANSCRIPT_URL.format(video_id=video_id),
+        params={"lang": "en"},
+        timeout=15,
+        follow_redirects=True,
+    )
+    resp.raise_for_status()
+    segments = _parse_public_transcript(resp.text)
+    if not segments:
+        raise TranscriptUnavailableError("youtube-transcript.ai returned no timestamped transcript.")
+    logger.info("Fetched captions via youtube-transcript.ai (%d paragraphs)", len(segments))
+    return segments
+
+
 def _fetch_via_whisper(
     youtube_url: str, video_id: str, on_progress: ProgressCallback = _noop_progress
 ) -> list[dict]:
@@ -363,6 +422,14 @@ def get_transcript(
         logger.info("No captions available for %s (%s); falling back to Whisper.", video_id, exc)
     except Exception as exc:
         logger.info("Caption fetch failed for %s (%s); falling back to Whisper.", video_id, exc)
+
+    try:
+        on_progress("⏳ Direct caption fetch blocked — trying public transcript service (youtube-transcript.ai)...")
+        segments = _fetch_captions_public(video_id)
+        _last_method = "captions via youtube-transcript.ai, paragraph-level timestamps"
+        return segments
+    except Exception as exc:
+        logger.info("Public transcript service failed for %s (%s); falling back to Whisper.", video_id, exc)
 
     try:
         if local_media_path:

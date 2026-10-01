@@ -48,7 +48,11 @@ def test_get_transcript_uses_local_media_instead_of_downloading(monkeypatch):
         raise AssertionError("should not download audio when a local file is given")
 
     transcribed = []
+    def no_public(video_id):
+        raise RuntimeError("public service down")
+
     monkeypatch.setattr(t, "_fetch_captions", no_captions)
+    monkeypatch.setattr(t, "_fetch_captions_public", no_public)
     monkeypatch.setattr(t, "_fetch_via_whisper", fail_download)
     monkeypatch.setattr(
         t, "_transcribe_file",
@@ -60,6 +64,92 @@ def test_get_transcript_uses_local_media_instead_of_downloading(monkeypatch):
     assert transcribed == ["upload.mp4"]
     assert segments == [{"text": "hi", "start": 0.0, "duration": 1.0}]
     assert t.get_last_transcript_method() == "whisper"
+
+
+PUBLIC_MARKDOWN = """# Transcript: Some Title
+
+Source video: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+Language: en · Duration: 1:05:30 · Words: 481
+
+[0:00] First paragraph.
+
+[0:19] Second paragraph, with: a colon.
+
+[1:02:03] Hour-mark paragraph.
+"""
+
+
+def test_parse_public_transcript():
+    from pipeline import transcript as t
+
+    assert t._parse_public_transcript(PUBLIC_MARKDOWN) == [
+        {"text": "First paragraph.", "start": 0.0, "duration": 19.0},
+        {"text": "Second paragraph, with: a colon.", "start": 19.0, "duration": 3704.0},
+        {"text": "Hour-mark paragraph.", "start": 3723.0, "duration": 207.0},
+    ]
+
+
+def test_parse_public_transcript_without_timestamps_is_empty():
+    from pipeline import transcript as t
+
+    assert t._parse_public_transcript("# Transcript\n\nno timestamps here") == []
+
+
+def test_parse_public_transcript_last_duration_fallback():
+    from pipeline import transcript as t
+
+    assert t._parse_public_transcript("[0:10] only line") == [
+        {"text": "only line", "start": 10.0, "duration": 5.0}
+    ]
+
+
+def test_fetch_captions_public_uses_mocked_http(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from pipeline import transcript as t
+
+    resp = MagicMock(text=PUBLIC_MARKDOWN)
+    monkeypatch.setattr("httpx.get", lambda *a, **kw: resp)
+
+    assert len(t._fetch_captions_public("dQw4w9WgXcQ")) == 3
+
+
+def test_get_transcript_falls_back_direct_then_public_then_whisper(monkeypatch):
+    from pipeline import transcript as t
+
+    calls = []
+
+    def direct_blocked(video_id):
+        calls.append("direct")
+        raise RuntimeError("blocked IP")
+
+    def public_ok(video_id):
+        calls.append("public")
+        return [{"text": "hi", "start": 0.0, "duration": 1.0}]
+
+    def whisper_unexpected(*a, **kw):
+        raise AssertionError("whisper should not run when the public service works")
+
+    monkeypatch.setattr(t, "_fetch_captions", direct_blocked)
+    monkeypatch.setattr(t, "_fetch_captions_public", public_ok)
+    monkeypatch.setattr(t, "_fetch_via_whisper", whisper_unexpected)
+
+    segments = t.get_transcript("https://youtu.be/dQw4w9WgXcQ")
+
+    assert calls == ["direct", "public"]
+    assert segments[0]["text"] == "hi"
+    assert "youtube-transcript.ai" in t.get_last_transcript_method()
+
+
+def test_get_transcript_direct_success_skips_public(monkeypatch):
+    from pipeline import transcript as t
+
+    monkeypatch.setattr(t, "_fetch_captions", lambda v: [{"text": "x", "start": 0.0, "duration": 1.0}])
+    monkeypatch.setattr(t, "_fetch_captions_public", lambda v: (_ for _ in ()).throw(AssertionError("no")))
+
+    t.get_transcript("dQw4w9WgXcQ")
+
+    assert t.get_last_transcript_method() == "captions"
 
 
 def test_groq_transcription_offsets_each_chunk(monkeypatch):
