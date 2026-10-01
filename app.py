@@ -409,9 +409,10 @@ url = st.text_input("YouTube video URL", placeholder="https://www.youtube.com/wa
 uploaded_video = st.file_uploader(
     "Optional: upload the video file",
     type=["mp4", "mov", "mkv", "webm"],
-    help="YouTube often blocks downloads from this server's IP. If the run fails at "
-    "'Cutting clips', download the video yourself, upload it here, and click Run again — "
-    "captions and AI analysis still come from the URL above.",
+    help="YouTube often blocks downloads from this server's IP. If the run fails with a "
+    "YouTube block (while fetching the transcript or cutting clips), download the video "
+    "yourself, upload it here, and click Run again — it's used for speech-to-text when the "
+    "video has no captions and as the source for cutting; the URL above still identifies the video.",
 )
 run_clicked = st.button("Run", type="primary", disabled=not url)
 
@@ -450,14 +451,15 @@ def _friendly_reason(exc: Exception) -> str:
             "video or a bug in Shorts Miner. It sometimes clears up on retry, but "
             "may keep happening for videos without captions (which need this "
             "download step) until the host's IP falls out of YouTube's suspicion "
-            "window."
+            "window. To skip the download entirely, upload the video file above "
+            "and run again."
         )
     if "403" in msg or "forbidden" in msg_lower:
         return (
             "YouTube is temporarily blocking video downloads from this server's IP "
             "address — common on shared/cloud hosting, and not a bug in Shorts "
-            "Miner. It usually clears up on its own; try again in a bit, or with "
-            "a different video."
+            "Miner. It usually clears up on its own; try again in a bit, or "
+            "upload the video file above to skip the download."
         )
     if isinstance(exc, VideoUnavailableError):
         return (
@@ -518,7 +520,23 @@ def _build_clips_zip(clip_paths: list[str]) -> bytes:
 if run_clicked:
     try:
         with st.status("Running Shorts Miner...", expanded=True) as status:
-            transcript = get_transcript(url, on_progress=status.write)
+            if "session_id" not in st.session_state:
+                st.session_state["session_id"] = uuid.uuid4().hex
+            # Saved before the transcript step, not just for cutting: a video
+            # without captions otherwise needs a YouTube audio download for
+            # Whisper, which is the first thing the host IP's bot-check blocks.
+            upload_path = None
+            if uploaded_video is not None:
+                upload_dir = os.path.join(SOURCE_DIR, st.session_state["session_id"])
+                os.makedirs(upload_dir, exist_ok=True)
+                ext = os.path.splitext(uploaded_video.name)[1].lower()
+                upload_path = os.path.join(upload_dir, f"{extract_video_id(url)}{ext}")
+                with open(upload_path, "wb") as fh:
+                    fh.write(uploaded_video.getbuffer())
+
+            transcript = get_transcript(
+                url, on_progress=status.write, local_media_path=upload_path
+            )
             method = get_last_transcript_method() or "unknown"
             status.write(f"✅ Transcript loaded ({len(transcript)} segments, via {method})")
 
@@ -526,15 +544,8 @@ if run_clicked:
             status.write(f"✅ Top {len(scored)} moments identified")
 
             status.write("⏳ Cutting clips...")
-            if "session_id" not in st.session_state:
-                st.session_state["session_id"] = uuid.uuid4().hex
-            if uploaded_video is not None:
-                upload_dir = os.path.join(SOURCE_DIR, st.session_state["session_id"])
-                os.makedirs(upload_dir, exist_ok=True)
-                ext = os.path.splitext(uploaded_video.name)[1].lower()
-                with open(os.path.join(upload_dir, f"{extract_video_id(url)}{ext}"), "wb") as fh:
-                    fh.write(uploaded_video.getbuffer())
-                source_path = download_video(url, output_path=upload_dir)
+            if upload_path is not None:
+                source_path = download_video(url, output_path=os.path.dirname(upload_path))
             else:
                 source_path = download_video(url)
             session_clips_dir = os.path.join(CLIPS_DIR, st.session_state["session_id"])

@@ -144,13 +144,6 @@ def _fetch_via_whisper(
     """Fallback: download audio with yt-dlp, transcribe locally with Whisper."""
     import tempfile
 
-    try:
-        import whisper
-    except ImportError as exc:
-        raise TranscriptUnavailableError(
-            "No captions available and openai-whisper is not installed for the fallback."
-        ) from exc
-
     import yt_dlp
 
     from utils.ytdlp_client import extract_with_client_fallback
@@ -184,34 +177,49 @@ def _fetch_via_whisper(
                 f"Audio download for video {video_id} did not produce an mp3 file."
             )
 
-        if not _whisper_semaphore.acquire(blocking=False):
-            on_progress(
-                "⏳ Someone else's video is currently being processed — please "
-                "kindly wait, yours will start automatically as soon as it's done."
-            )
-            _whisper_semaphore.acquire()
-        try:
-            on_progress(f"⏳ Transcribing audio locally with Whisper ({WHISPER_MODEL_SIZE} model)...")
-            logger.info("Transcribing audio locally with Whisper (%s model)...", WHISPER_MODEL_SIZE)
-            model = whisper.load_model(WHISPER_MODEL_SIZE)
-            result = model.transcribe(audio_path)
-        finally:
-            _whisper_semaphore.release()
+        return _transcribe_file(audio_path, on_progress=on_progress)
 
-        segments = [
-            {
-                "text": seg["text"].strip(),
-                "start": float(seg["start"]),
-                "duration": float(seg["end"]) - float(seg["start"]),
-            }
-            for seg in result["segments"]
-        ]
-        logger.info("Transcribed via Whisper (%d segments)", len(segments))
-        return segments
+
+def _transcribe_file(media_path: str, on_progress: ProgressCallback = _noop_progress) -> list[dict]:
+    """Transcribe a local audio or video file with Whisper (which decodes any
+    ffmpeg-readable container, so an uploaded .mp4 works as-is)."""
+    try:
+        import whisper
+    except ImportError as exc:
+        raise TranscriptUnavailableError(
+            "No captions available and openai-whisper is not installed for the fallback."
+        ) from exc
+
+    if not _whisper_semaphore.acquire(blocking=False):
+        on_progress(
+            "⏳ Someone else's video is currently being processed — please "
+            "kindly wait, yours will start automatically as soon as it's done."
+        )
+        _whisper_semaphore.acquire()
+    try:
+        on_progress(f"⏳ Transcribing audio locally with Whisper ({WHISPER_MODEL_SIZE} model)...")
+        logger.info("Transcribing audio locally with Whisper (%s model)...", WHISPER_MODEL_SIZE)
+        model = whisper.load_model(WHISPER_MODEL_SIZE)
+        result = model.transcribe(media_path)
+    finally:
+        _whisper_semaphore.release()
+
+    segments = [
+        {
+            "text": seg["text"].strip(),
+            "start": float(seg["start"]),
+            "duration": float(seg["end"]) - float(seg["start"]),
+        }
+        for seg in result["segments"]
+    ]
+    logger.info("Transcribed via Whisper (%d segments)", len(segments))
+    return segments
 
 
 def get_transcript(
-    youtube_url: str, on_progress: ProgressCallback = _noop_progress
+    youtube_url: str,
+    on_progress: ProgressCallback = _noop_progress,
+    local_media_path: str | None = None,
 ) -> list[dict]:
     """Get a transcript for a YouTube video as a list of {text, start, duration} dicts.
 
@@ -224,6 +232,11 @@ def get_transcript(
     transcribing) — the Whisper fallback in particular can take several minutes, and
     without visible progress a caller has no way to distinguish "still working" from
     "stuck".
+
+    local_media_path, if given, is a copy of the video the user already has on
+    disk (e.g. uploaded through the UI): when captions aren't available Whisper
+    transcribes it directly instead of downloading audio from YouTube, which is
+    the step YouTube's bot-check blocks on cloud hosts.
     """
     global _last_method
     video_id = extract_video_id(youtube_url)
@@ -243,7 +256,10 @@ def get_transcript(
         logger.info("Caption fetch failed for %s (%s); falling back to Whisper.", video_id, exc)
 
     try:
-        segments = _fetch_via_whisper(youtube_url, video_id, on_progress=on_progress)
+        if local_media_path:
+            segments = _transcribe_file(local_media_path, on_progress=on_progress)
+        else:
+            segments = _fetch_via_whisper(youtube_url, video_id, on_progress=on_progress)
         _last_method = "whisper"
         return segments
     except TranscriptError:
